@@ -1,0 +1,14 @@
+# LocationSimulator Python Dependencies
+
+# Core iOS device communication
+pymobiledevice3>=2.0.0
+
+# GUI Framework
+PyQt6>=6.5.0
+PyQt6-WebEngine>=6.5.0
+
+# Additional utilities (optional)
+# These are included in pymobiledevice3 but listed for reference
+# construct
+# packaging
+# cryptography
