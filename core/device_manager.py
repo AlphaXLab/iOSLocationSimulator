@@ -111,52 +111,60 @@ class DeviceManager(QObject):
             
     def _fetch_devices(self) -> List[iOSDevice]:
         """Fetch connected devices using pymobiledevice3"""
-        devices = []
-        
         try:
-            from pymobiledevice3.usbmux import list_devices
-            from pymobiledevice3.lockdown import create_using_usbmux
-            
-            for device in list_devices():
-                try:
-                    lockdown = create_using_usbmux(serial=device.serial)
-                    
-                    # Get device info
-                    all_values = lockdown.all_values
-                    
-                    name = all_values.get('DeviceName', 'Unknown')
-                    model = all_values.get('ProductType', 'iPhone')
-                    ios_version = all_values.get('ProductVersion', 'Unknown')
-                    udid = device.serial
-                    
-                    # Determine connection type
-                    conn_type = ConnectionType.USB
-                    if hasattr(device, 'connection_type'):
-                        if 'wifi' in str(device.connection_type).lower():
-                            conn_type = ConnectionType.WIFI
-                    
-                    # Format model name
-                    model = self._format_model_name(model)
-                    
-                    devices.append(iOSDevice(
-                        udid=udid,
-                        name=name,
-                        model=model,
-                        ios_version=ios_version,
-                        connection_type=conn_type
-                    ))
-                    
-                except Exception as e:
-                    print(f"Error reading device {device.serial}: {e}")
-                    continue
-                    
+            return asyncio.run(self._fetch_devices_async())
         except ImportError:
             self.error_occurred.emit(
                 "pymobiledevice3 not installed. Run: pip3 install pymobiledevice3"
             )
+            return []
         except Exception as e:
             print(f"Error listing devices: {e}")
-            
+            return []
+
+    async def _fetch_devices_async(self) -> List[iOSDevice]:
+        """Async fetch of connected devices (pymobiledevice3 11+ APIs are async)"""
+        from pymobiledevice3.usbmux import list_devices
+        from pymobiledevice3.lockdown import create_using_usbmux
+
+        devices = []
+
+        for device in await list_devices():
+            lockdown = None
+            try:
+                lockdown = await create_using_usbmux(serial=device.serial)
+                all_values = lockdown.all_values
+
+                name = all_values.get('DeviceName', 'Unknown')
+                model = all_values.get('ProductType', 'iPhone')
+                ios_version = all_values.get('ProductVersion', 'Unknown')
+                udid = device.serial
+
+                conn_type = ConnectionType.USB
+                connection_type = str(getattr(device, 'connection_type', '')).lower()
+                if 'network' in connection_type or 'wifi' in connection_type:
+                    conn_type = ConnectionType.WIFI
+
+                model = self._format_model_name(model)
+
+                devices.append(iOSDevice(
+                    udid=udid,
+                    name=name,
+                    model=model,
+                    ios_version=ios_version,
+                    connection_type=conn_type
+                ))
+
+            except Exception as e:
+                print(f"Error reading device {device.serial}: {e}")
+                continue
+            finally:
+                if lockdown is not None:
+                    try:
+                        await lockdown.close()
+                    except Exception:
+                        pass
+
         return devices
     
     def _format_model_name(self, identifier: str) -> str:

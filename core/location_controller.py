@@ -160,64 +160,7 @@ class LocationController(QObject):
     def _simulate_location(self, udid: str, latitude: float, longitude: float) -> SimulationResult:
         """Simulate location using pymobiledevice3"""
         try:
-            logger.debug(f"Importing pymobiledevice3 modules...")
-            from pymobiledevice3.lockdown import create_using_usbmux
-            from pymobiledevice3.services.dvt.dvt_secure_socket_proxy import DvtSecureSocketProxyService
-            from pymobiledevice3.services.dvt.instruments.location_simulation import LocationSimulation
-
-            # Connect to device
-            logger.debug(f"Connecting to device with UDID: {udid}")
-            lockdown = create_using_usbmux(serial=udid)
-            logger.debug(f"Lockdown connection established: {lockdown}")
-
-            # Get iOS version to determine approach
-            ios_version_str = lockdown.all_values.get('ProductVersion', '0.0')
-            ios_major_version = int(ios_version_str.split('.')[0])
-            logger.debug(f"iOS version detected: {ios_version_str} (major: {ios_major_version})")
-
-            # For iOS 17+, use RemoteXPC tunnel approach
-            if ios_major_version >= 17:
-                logger.info(f"iOS 17+ detected - using RemoteXPC tunnel approach")
-
-                # Get tunnel info
-                tunnel_info = self._get_tunnel_info(udid)
-                if not tunnel_info:
-                    return SimulationResult(
-                        success=False,
-                        message=f"❌ RemoteXPC Tunnel Not Running\n\n"
-                                f"iOS {ios_version_str} requires a RemoteXPC tunnel.\n\n"
-                                f"Please start the tunnel first:\n"
-                                f"1. Open a terminal window\n"
-                                f"2. Run: ./start_tunnel.sh\n"
-                                f"3. Keep that terminal running\n"
-                                f"4. Try setting location again\n\n"
-                                f"The tunnel must stay running while using location simulation."
-                    )
-
-                tunnel_addr, tunnel_port = tunnel_info
-
-                # Stop any existing iOS 17+ simulation first
-                self._stop_ios17_simulation()
-
-                # Start the location simulation process (keeps connection open)
-                result = self._start_ios17_simulation(udid, tunnel_addr, tunnel_port, latitude, longitude)
-                return result
-
-            # For iOS 16 and below, use direct lockdown approach
-            logger.debug(f"Using direct lockdown approach for iOS {ios_major_version}")
-
-            # Start location simulation
-            logger.debug(f"Creating DvtSecureSocketProxyService...")
-            with DvtSecureSocketProxyService(lockdown) as dvt:
-                logger.debug(f"DVT service created, simulating location...")
-                LocationSimulation(dvt).simulate_location(latitude, longitude)
-                logger.debug(f"Location simulation command sent successfully")
-
-            return SimulationResult(
-                success=True,
-                message=f"✅ Location set to {latitude:.4f}, {longitude:.4f}"
-            )
-
+            return asyncio.run(self._simulate_location_async(udid, latitude, longitude))
         except ImportError as e:
             logger.error(f"Import error: {str(e)}\n{traceback.format_exc()}")
             return SimulationResult(
@@ -229,7 +172,6 @@ class LocationController(QObject):
             error_trace = traceback.format_exc()
             logger.error(f"Exception in _simulate_location: {error_msg}\n{error_trace}")
 
-            # Handle common errors
             if "DeveloperMode" in error_msg or "developer" in error_msg.lower():
                 return SimulationResult(
                     success=False,
@@ -255,29 +197,23 @@ class LocationController(QObject):
                     success=False,
                     message=f"❌ {error_msg}\n\nFull error: {error_trace}"
                 )
-    
-    def _clear_simulated_location(self, udid: str) -> SimulationResult:
-        """Clear simulated location using pymobiledevice3"""
+
+    async def _simulate_location_async(self, udid: str, latitude: float, longitude: float) -> SimulationResult:
+        """Async location simulation (pymobiledevice3 11+ APIs)"""
+        from pymobiledevice3.lockdown import create_using_usbmux
+        from pymobiledevice3.services.simulate_location import DtSimulateLocation
+
+        logger.debug(f"Connecting to device with UDID: {udid}")
+        lockdown = await create_using_usbmux(serial=udid)
         try:
-            logger.debug(f"Clearing location simulation for device: {udid}")
-            from pymobiledevice3.lockdown import create_using_usbmux
-            from pymobiledevice3.services.dvt.dvt_secure_socket_proxy import DvtSecureSocketProxyService
-            from pymobiledevice3.services.dvt.instruments.location_simulation import LocationSimulation
-
-            # Connect to device
-            logger.debug(f"Connecting to device with UDID: {udid}")
-            lockdown = create_using_usbmux(serial=udid)
-
-            # Get iOS version to determine approach
             ios_version_str = lockdown.all_values.get('ProductVersion', '0.0')
             ios_major_version = int(ios_version_str.split('.')[0])
             logger.debug(f"iOS version detected: {ios_version_str} (major: {ios_major_version})")
 
-            # For iOS 17+, use RemoteXPC tunnel approach
+            # For iOS 17+, use RemoteXPC tunnel + DVT CLI subprocess (keeps connection open)
             if ios_major_version >= 17:
                 logger.info(f"iOS 17+ detected - using RemoteXPC tunnel approach")
 
-                # Get tunnel info
                 tunnel_info = self._get_tunnel_info(udid)
                 if not tunnel_info:
                     return SimulationResult(
@@ -288,39 +224,34 @@ class LocationController(QObject):
                                 f"1. Open a terminal window\n"
                                 f"2. Run: ./start_tunnel.sh\n"
                                 f"3. Keep that terminal running\n"
-                                f"4. Try clearing location again\n\n"
+                                f"4. Try setting location again\n\n"
                                 f"The tunnel must stay running while using location simulation."
                     )
 
-                # For iOS 17+, just stop the running simulation process
+                tunnel_addr, tunnel_port = tunnel_info
                 self._stop_ios17_simulation()
+                return self._start_ios17_simulation(udid, tunnel_addr, tunnel_port, latitude, longitude)
 
-                logger.info(f"iOS 17+ location cleared by stopping simulation process")
-                return SimulationResult(
-                    success=True,
-                    message="✅ Simulated location cleared"
-                )
-
-            # For iOS 16 and below, use direct lockdown approach
-            logger.debug(f"Using direct lockdown approach for iOS {ios_major_version}")
-
-            # Clear location simulation
-            logger.debug(f"Creating DvtSecureSocketProxyService...")
-            with DvtSecureSocketProxyService(lockdown) as dvt:
-                logger.debug(f"Clearing location simulation...")
-                LocationSimulation(dvt).clear()
-                logger.debug(f"Location simulation cleared successfully")
+            # For iOS 16 and below, use com.apple.dt.simulatelocation
+            logger.debug(f"Using DtSimulateLocation for iOS {ios_major_version}")
+            await DtSimulateLocation(lockdown).set(latitude, longitude)
+            logger.debug(f"Location simulation command sent successfully")
 
             return SimulationResult(
                 success=True,
-                message="✅ Simulated location cleared"
+                message=f"✅ Location set to {latitude:.4f}, {longitude:.4f}"
             )
-
+        finally:
+            await lockdown.close()
+    
+    def _clear_simulated_location(self, udid: str) -> SimulationResult:
+        """Clear simulated location using pymobiledevice3"""
+        try:
+            return asyncio.run(self._clear_simulated_location_async(udid))
         except Exception as e:
             error_trace = traceback.format_exc()
             logger.error(f"Failed to clear location: {str(e)}\n{error_trace}")
 
-            # Handle InvalidService error specifically
             error_msg = str(e)
             if "InvalidService" in error_msg or "Invalid Service" in error_msg:
                 return SimulationResult(
@@ -336,6 +267,53 @@ class LocationController(QObject):
                 success=False,
                 message=f"❌ Failed to clear location: {str(e)}\n\nFull error: {error_trace}"
             )
+
+    async def _clear_simulated_location_async(self, udid: str) -> SimulationResult:
+        """Async clear of simulated location (pymobiledevice3 11+ APIs)"""
+        from pymobiledevice3.lockdown import create_using_usbmux
+        from pymobiledevice3.services.simulate_location import DtSimulateLocation
+
+        logger.debug(f"Clearing location simulation for device: {udid}")
+        lockdown = await create_using_usbmux(serial=udid)
+        try:
+            ios_version_str = lockdown.all_values.get('ProductVersion', '0.0')
+            ios_major_version = int(ios_version_str.split('.')[0])
+            logger.debug(f"iOS version detected: {ios_version_str} (major: {ios_major_version})")
+
+            if ios_major_version >= 17:
+                logger.info(f"iOS 17+ detected - using RemoteXPC tunnel approach")
+
+                tunnel_info = self._get_tunnel_info(udid)
+                if not tunnel_info:
+                    return SimulationResult(
+                        success=False,
+                        message=f"❌ RemoteXPC Tunnel Not Running\n\n"
+                                f"iOS {ios_version_str} requires a RemoteXPC tunnel.\n\n"
+                                f"Please start the tunnel first:\n"
+                                f"1. Open a terminal window\n"
+                                f"2. Run: ./start_tunnel.sh\n"
+                                f"3. Keep that terminal running\n"
+                                f"4. Try clearing location again\n\n"
+                                f"The tunnel must stay running while using location simulation."
+                    )
+
+                self._stop_ios17_simulation()
+                logger.info(f"iOS 17+ location cleared by stopping simulation process")
+                return SimulationResult(
+                    success=True,
+                    message="✅ Simulated location cleared"
+                )
+
+            logger.debug(f"Using DtSimulateLocation clear for iOS {ios_major_version}")
+            await DtSimulateLocation(lockdown).clear()
+            logger.debug(f"Location simulation cleared successfully")
+
+            return SimulationResult(
+                success=True,
+                message="✅ Simulated location cleared"
+            )
+        finally:
+            await lockdown.close()
     
     # Route simulation methods
     
