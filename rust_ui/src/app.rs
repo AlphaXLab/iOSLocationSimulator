@@ -2,10 +2,11 @@ use crate::daemon::{DaemonClient, DaemonEvent};
 use crate::geocoding::{parse_coordinates, GeocodingClient};
 use crate::models::{GPXRoute, SavedLocation, SearchSuggestion, TunnelStatus, iOSDevice};
 use eframe::egui::{
-    self, Align, Align2, Color32, CornerRadius, FontId, Layout, Margin, Pos2, Rect, Stroke,
-    StrokeKind, Vec2,
+    self, Align, Align2, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId,
+    Layout, Margin, Pos2, Rect, Stroke, StrokeKind, Vec2,
 };
-use walkers::{lat_lon, HttpOptions, HttpTiles, Map, MapMemory, Position};
+use std::sync::Arc;
+use walkers::{lat_lon, HttpOptions, HttpTiles, Map, MapMemory, Position, TileId};
 
 #[derive(PartialEq, Clone, Copy)]
 enum SidebarTab {
@@ -14,41 +15,69 @@ enum SidebarTab {
 }
 
 // ---------------------------------------------------------------------------
-// Design System Tokens (macOS Human Interface Guidelines inspired)
+// CartoDB Dark Matter Tile Source (High-Performance Dark Map)
+// ---------------------------------------------------------------------------
+#[derive(Clone, Copy, Default)]
+pub struct CartoDark;
+
+impl walkers::sources::TileSource for CartoDark {
+    fn tile_url(&self, tile_id: TileId) -> String {
+        let servers = ['a', 'b', 'c', 'd'];
+        let s = servers[(tile_id.x + tile_id.y) as usize % servers.len()];
+        format!(
+            "https://{}.basemaps.cartocdn.com/dark_all/{}/{}/{}.png",
+            s, tile_id.zoom, tile_id.x, tile_id.y
+        )
+    }
+
+    fn attribution(&self) -> walkers::sources::Attribution {
+        walkers::sources::Attribution {
+            text: "© OpenStreetMap contributors © CARTO",
+            url: "https://carto.com/attributions",
+            logo_light: None,
+            logo_dark: None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Professional macOS Dark Theme Tokens
 // ---------------------------------------------------------------------------
 #[allow(dead_code)]
-struct Theme;
+struct DarkTheme;
 #[allow(dead_code)]
-impl Theme {
-    // Backgrounds
-    const APP_BG: Color32 = Color32::from_rgb(246, 248, 250);
-    const SIDEBAR_BG: Color32 = Color32::from_rgb(255, 255, 255);
-    const SURFACE: Color32 = Color32::from_rgb(255, 255, 255);
-    const SURFACE_HOVER: Color32 = Color32::from_rgb(248, 250, 252);
-    const SURFACE_MUTED: Color32 = Color32::from_rgb(241, 245, 249);
+impl DarkTheme {
+    // Surfaces
+    pub const WINDOW_BG: Color32 = Color32::from_rgb(14, 16, 21);
+    pub const SIDEBAR_BG: Color32 = Color32::from_rgb(18, 21, 28);
+    pub const HEADER_BG: Color32 = Color32::from_rgb(18, 21, 28);
+    pub const BOTTOM_BG: Color32 = Color32::from_rgb(18, 21, 28);
+    pub const CARD_BG: Color32 = Color32::from_rgb(26, 30, 41);
+    pub const CARD_HOVER: Color32 = Color32::from_rgb(34, 40, 54);
+    pub const CARD_SELECTED: Color32 = Color32::from_rgb(22, 38, 64);
+    pub const INSET_BG: Color32 = Color32::from_rgb(11, 13, 18);
 
-    // Borders & Dividers
-    const BORDER_SUBTLE: Color32 = Color32::from_rgb(226, 232, 240);
-    const BORDER_HOVER: Color32 = Color32::from_rgb(203, 213, 225);
+    // Borders
+    pub const BORDER: Color32 = Color32::from_rgb(38, 44, 60);
+    pub const BORDER_LIGHT: Color32 = Color32::from_rgb(52, 60, 80);
+    pub const BORDER_ACTIVE: Color32 = Color32::from_rgb(0, 122, 255);
 
-    // Text hierarchy
-    const TEXT_PRIMARY: Color32 = Color32::from_rgb(15, 23, 42); // Slate 900
-    const TEXT_SECONDARY: Color32 = Color32::from_rgb(71, 85, 105); // Slate 600
-    const TEXT_MUTED: Color32 = Color32::from_rgb(148, 163, 184); // Slate 400
+    // Typography
+    pub const TEXT_TITLE: Color32 = Color32::from_rgb(248, 250, 252);
+    pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(226, 232, 240);
+    pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(148, 163, 184);
+    pub const TEXT_MUTED: Color32 = Color32::from_rgb(100, 116, 139);
+    pub const TEXT_CYAN: Color32 = Color32::from_rgb(56, 189, 248);
 
-    // Accent Colors
-    const ACCENT_BLUE: Color32 = Color32::from_rgb(0, 113, 227); // Apple System Blue
-    const ACCENT_BLUE_HOVER: Color32 = Color32::from_rgb(0, 93, 190);
-    const ACCENT_BLUE_BG: Color32 = Color32::from_rgb(238, 246, 255);
-
-    const SUCCESS_GREEN: Color32 = Color32::from_rgb(40, 167, 69);
-    const SUCCESS_BG: Color32 = Color32::from_rgb(236, 253, 243);
-
-    const DANGER_RED: Color32 = Color32::from_rgb(220, 38, 38);
-    const DANGER_BG: Color32 = Color32::from_rgb(254, 242, 242);
-
-    const WARNING_AMBER: Color32 = Color32::from_rgb(217, 119, 6);
-    const WARNING_BG: Color32 = Color32::from_rgb(254, 243, 199);
+    // Accents
+    pub const ACCENT_BLUE: Color32 = Color32::from_rgb(0, 122, 255);
+    pub const ACCENT_BLUE_HOVER: Color32 = Color32::from_rgb(30, 144, 255);
+    pub const ACCENT_CYAN: Color32 = Color32::from_rgb(56, 189, 248);
+    pub const ACCENT_GREEN: Color32 = Color32::from_rgb(34, 197, 94);
+    pub const ACCENT_GREEN_BG: Color32 = Color32::from_rgb(20, 48, 30);
+    pub const ACCENT_RED: Color32 = Color32::from_rgb(239, 68, 68);
+    pub const ACCENT_RED_BG: Color32 = Color32::from_rgb(48, 20, 24);
+    pub const ACCENT_AMBER: Color32 = Color32::from_rgb(245, 158, 11);
 }
 
 pub struct LocationSimulatorApp {
@@ -98,7 +127,7 @@ pub struct LocationSimulatorApp {
 
 impl LocationSimulatorApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        Self::apply_macos_theme(&cc.egui_ctx);
+        Self::apply_fonts_and_dark_theme(&cc.egui_ctx);
 
         let daemon = DaemonClient::spawn().expect("Failed to initialize Python daemon sidecar");
         let geocoding = GeocodingClient::new();
@@ -107,8 +136,9 @@ impl LocationSimulatorApp {
             cache: dirs_cache_dir(),
             ..Default::default()
         };
+        // Use CartoDB Dark Matter tiles by default for dark theme
         let tiles = HttpTiles::with_options(
-            walkers::sources::OpenStreetMap,
+            CartoDark,
             http_options,
             cc.egui_ctx.to_owned(),
         );
@@ -153,36 +183,66 @@ impl LocationSimulatorApp {
         }
     }
 
-    fn apply_macos_theme(ctx: &egui::Context) {
-        let mut visuals = egui::Visuals::light();
+    fn apply_fonts_and_dark_theme(ctx: &egui::Context) {
+        // 1. Load System Fonts if available on macOS
+        let mut fonts = FontDefinitions::default();
+        if let Ok(sf_bytes) = std::fs::read("/System/Library/Fonts/SFCompact.ttf") {
+            fonts.font_data.insert(
+                "SFCompact".to_owned(),
+                Arc::new(FontData::from_owned(sf_bytes)),
+            );
+            if let Some(family) = fonts.families.get_mut(&FontFamily::Proportional) {
+                family.insert(0, "SFCompact".to_owned());
+            }
+        }
+        if let Ok(mono_bytes) = std::fs::read("/System/Library/Fonts/Monaco.ttf") {
+            fonts.font_data.insert(
+                "Monaco".to_owned(),
+                Arc::new(FontData::from_owned(mono_bytes)),
+            );
+            if let Some(family) = fonts.families.get_mut(&FontFamily::Monospace) {
+                family.insert(0, "Monaco".to_owned());
+            }
+        }
+        ctx.set_fonts(fonts);
 
-        visuals.panel_fill = Theme::SIDEBAR_BG;
-        visuals.window_fill = Theme::SURFACE;
-        visuals.extreme_bg_color = Theme::SURFACE;
-        visuals.faint_bg_color = Theme::SURFACE_MUTED;
+        // 2. Configure Dark Visuals
+        let mut visuals = egui::Visuals::dark();
 
-        visuals.selection.bg_fill = Theme::ACCENT_BLUE_BG;
-        visuals.selection.stroke = Stroke::new(1.5_f32, Theme::ACCENT_BLUE);
+        visuals.panel_fill = DarkTheme::SIDEBAR_BG;
+        visuals.window_fill = DarkTheme::CARD_BG;
+        visuals.extreme_bg_color = DarkTheme::INSET_BG;
+        visuals.faint_bg_color = DarkTheme::INSET_BG;
 
-        visuals.widgets.noninteractive.bg_fill = Theme::SURFACE;
+        visuals.selection.bg_fill = Color32::from_rgb(18, 52, 94);
+        visuals.selection.stroke = Stroke::new(1.5_f32, DarkTheme::ACCENT_BLUE);
+
+        // Noninteractive widgets
+        visuals.widgets.noninteractive.bg_fill = DarkTheme::CARD_BG;
         visuals.widgets.noninteractive.corner_radius = CornerRadius::same(6);
-        visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, Theme::BORDER_SUBTLE);
-        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, Theme::TEXT_PRIMARY);
+        visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, DarkTheme::BORDER);
+        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, DarkTheme::TEXT_PRIMARY);
 
-        visuals.widgets.inactive.bg_fill = Theme::SURFACE;
+        // Inactive widgets (buttons, inputs)
+        visuals.widgets.inactive.bg_fill = DarkTheme::CARD_BG;
         visuals.widgets.inactive.corner_radius = CornerRadius::same(6);
-        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, Theme::BORDER_SUBTLE);
-        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, Theme::TEXT_SECONDARY);
+        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, DarkTheme::BORDER);
+        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, DarkTheme::TEXT_PRIMARY);
 
-        visuals.widgets.hovered.bg_fill = Theme::SURFACE_HOVER;
+        // Hovered widgets
+        visuals.widgets.hovered.bg_fill = DarkTheme::CARD_HOVER;
         visuals.widgets.hovered.corner_radius = CornerRadius::same(6);
-        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, Theme::BORDER_HOVER);
-        visuals.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, Theme::TEXT_PRIMARY);
+        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, DarkTheme::BORDER_LIGHT);
+        visuals.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, DarkTheme::TEXT_TITLE);
 
-        visuals.widgets.active.bg_fill = Theme::ACCENT_BLUE_BG;
+        // Active widgets
+        visuals.widgets.active.bg_fill = Color32::from_rgb(28, 64, 112);
         visuals.widgets.active.corner_radius = CornerRadius::same(6);
-        visuals.widgets.active.bg_stroke = Stroke::new(1.5_f32, Theme::ACCENT_BLUE);
-        visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, Theme::ACCENT_BLUE);
+        visuals.widgets.active.bg_stroke = Stroke::new(1.5_f32, DarkTheme::ACCENT_BLUE);
+        visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, DarkTheme::TEXT_TITLE);
+
+        visuals.widgets.open.bg_fill = DarkTheme::CARD_BG;
+        visuals.widgets.open.corner_radius = CornerRadius::same(6);
 
         ctx.set_visuals(visuals);
 
@@ -243,11 +303,12 @@ impl LocationSimulatorApp {
                     self.gpx_routes = routes;
                 }
                 DaemonEvent::TunnelStatus(status) => {
+                    // Only show password dialog if user requested tunnel or iOS 17+ device exists
                     if status.status.as_deref() == Some("password_required") {
                         self.show_password_modal = true;
                     }
                     if let Some(ref err) = status.error {
-                        self.status_message = format!("Tunnel error: {err}");
+                        self.status_message = format!("Tunnel: {err}");
                         self.status_is_error = true;
                     }
                     self.tunnel_status = status;
@@ -281,53 +342,80 @@ impl eframe::App for LocationSimulatorApp {
         self.poll_background_events();
 
         // =========================================================================
-        // 1. TOP TOOLBAR & SPOTLIGHT SEARCH BAR
+        // 1. TOP TOOLBAR & SEARCH (Dark macOS Style)
         // =========================================================================
         egui::TopBottomPanel::top("top_toolbar")
             .frame(
                 egui::Frame::NONE
-                    .fill(Theme::SURFACE)
-                    .inner_margin(Margin::symmetric(20, 10))
-                    .stroke(Stroke::new(1.0_f32, Theme::BORDER_SUBTLE)),
+                    .fill(DarkTheme::HEADER_BG)
+                    .inner_margin(Margin::symmetric(20, 11))
+                    .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER)),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    // Clean Brand Badge
+                    // App Brand with subtle vector target icon
                     ui.horizontal(|ui| {
-                        let dot_rect = Rect::from_min_size(ui.cursor().min + Vec2::new(0.0, 4.0), Vec2::new(8.0, 8.0));
-                        ui.painter().circle_filled(dot_rect.center(), 4.0_f32, Theme::ACCENT_BLUE);
-                        ui.add_space(14.0);
+                        let icon_center = ui.cursor().min + Vec2::new(8.0, 10.0);
+                        ui.painter().circle_stroke(
+                            icon_center,
+                            6.0_f32,
+                            Stroke::new(1.5_f32, DarkTheme::ACCENT_BLUE),
+                        );
+                        ui.painter().circle_filled(
+                            icon_center,
+                            2.5_f32,
+                            DarkTheme::ACCENT_CYAN,
+                        );
+                        ui.add_space(22.0);
 
                         ui.label(
-                            egui::RichText::new("Location Simulator")
-                                .font(FontId::proportional(15.0))
+                            egui::RichText::new("LOCATION SIMULATOR")
+                                .font(FontId::proportional(13.0))
                                 .strong()
-                                .color(Theme::TEXT_PRIMARY),
+                                .color(DarkTheme::TEXT_TITLE),
+                        );
+
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new("v1.0")
+                                .font(FontId::monospace(10.5))
+                                .color(DarkTheme::TEXT_MUTED),
                         );
                     });
 
-                    ui.add_space(20.0);
+                    ui.add_space(24.0);
 
-                    // Professional Spotlight Search Pill
-                    let search_width = (ui.available_width() - 320.0).max(240.0);
+                    // Dark Spotlight Search Input
+                    let search_width = (ui.available_width() - 340.0).max(240.0);
                     let search_frame = egui::Frame::NONE
-                        .fill(Theme::SURFACE_MUTED)
+                        .fill(DarkTheme::INSET_BG)
                         .corner_radius(CornerRadius::same(7))
-                        .stroke(Stroke::new(1.0_f32, Theme::BORDER_SUBTLE))
+                        .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER))
                         .inner_margin(Margin::symmetric(12, 5));
 
                     search_frame.show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new("⌕")
-                                    .font(FontId::proportional(16.0))
-                                    .color(Theme::TEXT_MUTED),
+                            // Painted vector search glass icon
+                            let glass_center = ui.cursor().min + Vec2::new(6.0, 9.0);
+                            ui.painter().circle_stroke(
+                                glass_center,
+                                4.5_f32,
+                                Stroke::new(1.2_f32, DarkTheme::TEXT_MUTED),
                             );
+                            ui.painter().line_segment(
+                                [
+                                    glass_center + Vec2::new(3.5, 3.5),
+                                    glass_center + Vec2::new(7.0, 7.0),
+                                ],
+                                Stroke::new(1.5_f32, DarkTheme::TEXT_MUTED),
+                            );
+                            ui.add_space(18.0);
 
                             let search_edit = ui.add_sized(
-                                [search_width - 55.0, 22.0],
+                                [search_width - 65.0, 20.0],
                                 egui::TextEdit::singleline(&mut self.search_query)
-                                    .hint_text("Search location, city, coordinates (e.g. 37.77, -122.41)...")
+                                    .hint_text("Search city, address, or enter coordinates (lat, lon)...")
+                                    .text_color(DarkTheme::TEXT_PRIMARY)
                                     .frame(false),
                             );
 
@@ -362,14 +450,13 @@ impl eframe::App for LocationSimulatorApp {
                         });
                     });
 
-                    // Right Utility Actions
+                    // Right Actions
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        // About Menu button
                         if ui
                             .button(
                                 egui::RichText::new("About")
-                                    .font(FontId::proportional(12.5))
-                                    .color(Theme::TEXT_SECONDARY),
+                                    .font(FontId::proportional(12.0))
+                                    .color(DarkTheme::TEXT_SECONDARY),
                             )
                             .clicked()
                         {
@@ -381,24 +468,24 @@ impl eframe::App for LocationSimulatorApp {
                             let pill = egui::Button::new(
                                 egui::RichText::new("● TUNNEL ACTIVE")
                                     .font(FontId::proportional(11.0))
-                                    .color(Theme::SUCCESS_GREEN)
+                                    .color(DarkTheme::ACCENT_GREEN)
                                     .strong(),
                             )
-                            .fill(Theme::SUCCESS_BG)
-                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(187, 247, 208)))
+                            .fill(DarkTheme::ACCENT_GREEN_BG)
+                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(34, 120, 60)))
                             .corner_radius(CornerRadius::same(12));
 
-                            if ui.add(pill).on_hover_text("Tunnel is running. Click to stop.").clicked() {
+                            if ui.add(pill).on_hover_text("iOS 17+ tunnel is active. Click to stop.").clicked() {
                                 self.daemon.stop_tunnel();
                             }
                         } else {
                             let pill = egui::Button::new(
                                 egui::RichText::new("○ TUNNEL (iOS 17+)")
                                     .font(FontId::proportional(11.0))
-                                    .color(Theme::TEXT_MUTED),
+                                    .color(DarkTheme::TEXT_MUTED),
                             )
-                            .fill(Theme::SURFACE_MUTED)
-                            .stroke(Stroke::new(1.0_f32, Theme::BORDER_SUBTLE))
+                            .fill(DarkTheme::CARD_BG)
+                            .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER))
                             .corner_radius(CornerRadius::same(12));
 
                             if ui.add(pill).on_hover_text("Start RemoteXPC tunnel required for iOS 17+ devices").clicked() {
@@ -413,16 +500,16 @@ impl eframe::App for LocationSimulatorApp {
                 if self.show_suggestions && !self.suggestions.is_empty() {
                     ui.add_space(6.0);
                     let flyout = egui::Frame::NONE
-                        .fill(Theme::SURFACE)
+                        .fill(DarkTheme::CARD_BG)
                         .corner_radius(CornerRadius::same(8))
-                        .stroke(Stroke::new(1.0_f32, Theme::BORDER_SUBTLE))
+                        .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER_LIGHT))
                         .inner_margin(Margin::symmetric(14, 10));
 
                     flyout.show(ui, |ui| {
                         let mut chosen = None;
                         for item in self.suggestions.iter().take(4) {
                             ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("📍").color(Theme::ACCENT_BLUE));
+                                ui.label(egui::RichText::new("•").color(DarkTheme::ACCENT_CYAN));
                                 let text = if item.display_name.len() > 70 {
                                     format!("{}...", &item.display_name[..70])
                                 } else {
@@ -431,8 +518,8 @@ impl eframe::App for LocationSimulatorApp {
                                 if ui
                                     .link(
                                         egui::RichText::new(text)
-                                            .font(FontId::proportional(13.0))
-                                            .color(Theme::TEXT_PRIMARY),
+                                            .font(FontId::proportional(12.5))
+                                            .color(DarkTheme::TEXT_PRIMARY),
                                     )
                                     .clicked()
                                 {
@@ -450,31 +537,34 @@ impl eframe::App for LocationSimulatorApp {
             });
 
         // =========================================================================
-        // 2. BOTTOM CONTROL & SIMULATION STATUS BAR
+        // 2. BOTTOM CONTROL & STATUS BAR
         // =========================================================================
         egui::TopBottomPanel::bottom("bottom_bar")
             .frame(
                 egui::Frame::NONE
-                    .fill(Theme::SURFACE)
-                    .inner_margin(Margin::symmetric(24, 12))
-                    .stroke(Stroke::new(1.0_f32, Theme::BORDER_SUBTLE)),
+                    .fill(DarkTheme::BOTTOM_BG)
+                    .inner_margin(Margin::symmetric(22, 12))
+                    .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER)),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    // Live Status Dot & Message
-                    let (dot_color, text_color) = if self.status_is_error {
-                        (Theme::DANGER_RED, Theme::DANGER_RED)
+                    // Status dot & text
+                    let dot_color = if self.status_is_error {
+                        DarkTheme::ACCENT_RED
                     } else if self.status_message.starts_with("Setting") || self.status_message.starts_with("Starting") {
-                        (Theme::WARNING_AMBER, Theme::WARNING_AMBER)
+                        DarkTheme::ACCENT_AMBER
                     } else {
-                        (Theme::SUCCESS_GREEN, Theme::TEXT_SECONDARY)
+                        DarkTheme::ACCENT_GREEN
                     };
 
-                    ui.label(egui::RichText::new("●").color(dot_color).font(FontId::proportional(11.0)));
+                    let dot_center = ui.cursor().min + Vec2::new(4.0, 9.0);
+                    ui.painter().circle_filled(dot_center, 3.5_f32, dot_color);
+                    ui.add_space(14.0);
+
                     ui.label(
                         egui::RichText::new(&self.status_message)
-                            .font(FontId::proportional(13.0))
-                            .color(text_color),
+                            .font(FontId::proportional(12.5))
+                            .color(if self.status_is_error { DarkTheme::ACCENT_RED } else { DarkTheme::TEXT_SECONDARY }),
                     );
 
                     // Right Side Action Buttons
@@ -482,7 +572,7 @@ impl eframe::App for LocationSimulatorApp {
                         let (cur_lat, cur_lon) = self.current_center_coordinates();
                         let has_device = self.selected_udid.is_some() || !self.devices.is_empty();
 
-                        // Primary Action: "Set Location" (Apple Blue, clean bold font)
+                        // Primary Action: "Simulate Location" (Electric Apple Blue)
                         let set_btn = egui::Button::new(
                             egui::RichText::new("Simulate Location")
                                 .font(FontId::proportional(13.5))
@@ -490,50 +580,50 @@ impl eframe::App for LocationSimulatorApp {
                                 .color(Color32::WHITE),
                         )
                         .fill(if has_device {
-                            Theme::ACCENT_BLUE
+                            DarkTheme::ACCENT_BLUE
                         } else {
-                            Color32::from_rgb(203, 213, 225)
+                            Color32::from_rgb(40, 50, 70)
                         })
                         .corner_radius(CornerRadius::same(6));
 
                         if ui
                             .add_enabled(has_device, set_btn)
-                            .on_hover_text("Set current map crosshair location on selected iOS device")
+                            .on_hover_text("Send simulated GPS coordinates to selected device")
                             .clicked()
                         {
                             self.daemon.set_location(self.selected_udid.as_deref(), cur_lat, cur_lon);
-                            self.status_message = format!("Simulating position: {cur_lat:.5}, {cur_lon:.5}...");
+                            self.status_message = format!("Simulating coordinates: {cur_lat:.5}, {cur_lon:.5}...");
                             self.status_is_error = false;
                         }
 
-                        // Clear Button: Clean subtle red outline
+                        // Clear Button: Subtle dark red outline
                         let clear_btn = egui::Button::new(
                             egui::RichText::new("Clear Location")
-                                .font(FontId::proportional(13.0))
-                                .color(Theme::DANGER_RED),
+                                .font(FontId::proportional(12.5))
+                                .color(DarkTheme::ACCENT_RED),
                         )
-                        .fill(Theme::DANGER_BG)
-                        .stroke(Stroke::new(1.0_f32, Color32::from_rgb(254, 202, 202)))
+                        .fill(DarkTheme::ACCENT_RED_BG)
+                        .stroke(Stroke::new(1.0_f32, Color32::from_rgb(120, 30, 40)))
                         .corner_radius(CornerRadius::same(6));
 
                         if ui
                             .add_enabled(has_device, clear_btn)
-                            .on_hover_text("Clear location simulation and restore real device GPS")
+                            .on_hover_text("Reset device to actual physical GPS location")
                             .clicked()
                         {
                             self.daemon.clear_location(self.selected_udid.as_deref());
-                            self.status_message = "Restoring hardware GPS location...".to_string();
+                            self.status_message = "Restoring device hardware GPS...".to_string();
                             self.status_is_error = false;
                         }
 
-                        // Save Bookmark Button: Clean neutral
+                        // Save Bookmark Button
                         let save_btn = egui::Button::new(
                             egui::RichText::new("Save Bookmark")
-                                .font(FontId::proportional(13.0))
-                                .color(Theme::TEXT_PRIMARY),
+                                .font(FontId::proportional(12.5))
+                                .color(DarkTheme::TEXT_PRIMARY),
                         )
-                        .fill(Theme::SURFACE_MUTED)
-                        .stroke(Stroke::new(1.0_f32, Theme::BORDER_SUBTLE))
+                        .fill(DarkTheme::CARD_BG)
+                        .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER))
                         .corner_radius(CornerRadius::same(6));
 
                         if ui.add(save_btn).clicked() {
@@ -545,15 +635,15 @@ impl eframe::App for LocationSimulatorApp {
             });
 
         // =========================================================================
-        // 3. LEFT SIDEBAR (Devices & Navigation Panel)
+        // 3. LEFT SIDEBAR (Dark Cards & Segmented Tabs)
         // =========================================================================
         egui::SidePanel::left("left_sidebar")
-            .exact_width(300.0)
+            .exact_width(295.0)
             .frame(
                 egui::Frame::NONE
-                    .fill(Theme::APP_BG)
+                    .fill(DarkTheme::SIDEBAR_BG)
                     .inner_margin(Margin::symmetric(14, 14))
-                    .stroke(Stroke::new(1.0_f32, Theme::BORDER_SUBTLE)),
+                    .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER)),
             )
             .show(ctx, |ui| {
                 // Section Header: Devices
@@ -562,22 +652,21 @@ impl eframe::App for LocationSimulatorApp {
                         egui::RichText::new("CONNECTED DEVICES")
                             .font(FontId::proportional(11.0))
                             .strong()
-                            .color(Theme::TEXT_MUTED),
+                            .color(DarkTheme::TEXT_MUTED),
                     );
 
-                    let count_badge = format!("{}", self.devices.len());
                     ui.label(
-                        egui::RichText::new(count_badge)
-                            .font(FontId::proportional(11.0))
-                            .color(Theme::TEXT_SECONDARY),
+                        egui::RichText::new(format!("({})", self.devices.len()))
+                            .font(FontId::monospace(10.5))
+                            .color(DarkTheme::TEXT_SECONDARY),
                     );
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui
                             .button(
-                                egui::RichText::new("Refresh")
-                                    .font(FontId::proportional(11.5))
-                                    .color(Theme::ACCENT_BLUE),
+                                egui::RichText::new("↻ Refresh")
+                                    .font(FontId::proportional(11.0))
+                                    .color(DarkTheme::TEXT_CYAN),
                             )
                             .clicked()
                         {
@@ -588,33 +677,45 @@ impl eframe::App for LocationSimulatorApp {
 
                 ui.add_space(8.0);
 
-                // Devices List Card Container
+                // Devices List
                 if self.devices.is_empty() {
                     let empty = egui::Frame::NONE
-                        .fill(Theme::SURFACE)
+                        .fill(DarkTheme::CARD_BG)
                         .corner_radius(CornerRadius::same(8))
-                        .stroke(Stroke::new(1.0_f32, Theme::BORDER_SUBTLE))
-                        .inner_margin(Margin::symmetric(16, 20));
+                        .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER))
+                        .inner_margin(Margin::symmetric(16, 18));
 
                     empty.show(ui, |ui| {
                         ui.vertical_centered(|ui| {
-                            ui.label(
-                                egui::RichText::new("📱")
-                                    .font(FontId::proportional(26.0))
-                                    .color(Theme::TEXT_MUTED),
+                            // Painted vector phone shape
+                            let phone_rect = Rect::from_center_size(
+                                ui.cursor().min + Vec2::new(ui.available_width() / 2.0, 14.0),
+                                Vec2::new(18.0, 26.0),
                             );
-                            ui.add_space(6.0);
+                            ui.painter().rect_stroke(
+                                phone_rect,
+                                CornerRadius::same(4),
+                                Stroke::new(1.5_f32, DarkTheme::TEXT_MUTED),
+                                StrokeKind::Outside,
+                            );
+                            ui.painter().circle_filled(
+                                Pos2::new(phone_rect.center().x, phone_rect.bottom() - 4.0),
+                                1.5_f32,
+                                DarkTheme::TEXT_MUTED,
+                            );
+                            ui.add_space(34.0);
+
                             ui.label(
                                 egui::RichText::new("No iOS Device Found")
                                     .font(FontId::proportional(13.0))
                                     .strong()
-                                    .color(Theme::TEXT_PRIMARY),
+                                    .color(DarkTheme::TEXT_PRIMARY),
                             );
                             ui.add_space(2.0);
                             ui.label(
                                 egui::RichText::new("Connect via USB cable and trust this computer on your device.")
-                                    .font(FontId::proportional(11.5))
-                                    .color(Theme::TEXT_SECONDARY),
+                                    .font(FontId::proportional(11.0))
+                                    .color(DarkTheme::TEXT_MUTED),
                             );
                         });
                     });
@@ -628,14 +729,14 @@ impl eframe::App for LocationSimulatorApp {
 
                                 let (card_bg, border_color, border_w) = if is_selected {
                                     (
-                                        Theme::ACCENT_BLUE_BG,
-                                        Theme::ACCENT_BLUE,
+                                        DarkTheme::CARD_SELECTED,
+                                        DarkTheme::BORDER_ACTIVE,
                                         1.5_f32,
                                     )
                                 } else {
                                     (
-                                        Theme::SURFACE,
-                                        Theme::BORDER_SUBTLE,
+                                        DarkTheme::CARD_BG,
+                                        DarkTheme::BORDER,
                                         1.0_f32,
                                     )
                                 };
@@ -648,19 +749,19 @@ impl eframe::App for LocationSimulatorApp {
 
                                 card.show(ui, |ui| {
                                     ui.horizontal(|ui| {
-                                        // Left Icon Ring
-                                        let icon_box = Rect::from_min_size(ui.cursor().min, Vec2::new(32.0, 32.0));
-                                        ui.painter().circle_filled(
-                                            icon_box.center(),
-                                            16.0_f32,
-                                            if is_selected { Theme::SURFACE } else { Theme::SURFACE_MUTED },
+                                        // Left Device Avatar Badge
+                                        let badge_rect = Rect::from_min_size(ui.cursor().min, Vec2::new(32.0, 32.0));
+                                        ui.painter().rect_filled(
+                                            badge_rect,
+                                            CornerRadius::same(6),
+                                            if is_selected { Color32::from_rgb(16, 40, 72) } else { DarkTheme::INSET_BG },
                                         );
                                         ui.painter().text(
-                                            icon_box.center(),
+                                            badge_rect.center(),
                                             Align2::CENTER_CENTER,
-                                            "📱",
-                                            FontId::proportional(16.0),
-                                            Color32::BLACK,
+                                            "iOS",
+                                            FontId::monospace(10.5),
+                                            if is_selected { DarkTheme::TEXT_CYAN } else { DarkTheme::TEXT_MUTED },
                                         );
                                         ui.add_space(38.0);
 
@@ -668,9 +769,9 @@ impl eframe::App for LocationSimulatorApp {
                                         ui.vertical(|ui| {
                                             ui.horizontal(|ui| {
                                                 let name_label = egui::RichText::new(&dev.name)
-                                                    .font(FontId::proportional(13.5))
+                                                    .font(FontId::proportional(13.0))
                                                     .strong()
-                                                    .color(Theme::TEXT_PRIMARY);
+                                                    .color(DarkTheme::TEXT_TITLE);
 
                                                 if ui.selectable_label(is_selected, name_label).clicked() {
                                                     self.selected_udid = Some(dev.udid.clone());
@@ -680,15 +781,14 @@ impl eframe::App for LocationSimulatorApp {
 
                                             ui.label(
                                                 egui::RichText::new(format!("{} · iOS {}", dev.model, dev.ios_version))
-                                                    .font(FontId::proportional(11.5))
-                                                    .color(Theme::TEXT_SECONDARY),
+                                                    .font(FontId::proportional(11.0))
+                                                    .color(DarkTheme::TEXT_SECONDARY),
                                             );
 
-                                            let conn_label = format!("● Connected via {}", dev.connection_type);
                                             ui.label(
-                                                egui::RichText::new(conn_label)
+                                                egui::RichText::new(format!("● Connected ({})", dev.connection_type))
                                                     .font(FontId::proportional(10.5))
-                                                    .color(Theme::SUCCESS_GREEN),
+                                                    .color(DarkTheme::ACCENT_GREEN),
                                             );
                                         });
                                     });
@@ -702,10 +802,11 @@ impl eframe::App for LocationSimulatorApp {
                 ui.separator();
                 ui.add_space(8.0);
 
-                // Segmented Tab Picker (macOS Pill Style)
+                // Segmented Tab Switcher (Dark Inset Container)
                 let tab_container = egui::Frame::NONE
-                    .fill(Theme::SURFACE_MUTED)
+                    .fill(DarkTheme::INSET_BG)
                     .corner_radius(CornerRadius::same(7))
+                    .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER))
                     .inner_margin(Margin::symmetric(3, 3));
 
                 tab_container.show(ui, |ui| {
@@ -715,13 +816,13 @@ impl eframe::App for LocationSimulatorApp {
                         let is_loc = self.active_tab == SidebarTab::Locations;
                         let loc_btn = egui::Button::new(
                             egui::RichText::new("Saved Places")
-                                .font(FontId::proportional(12.5))
+                                .font(FontId::proportional(12.0))
                                 .strong()
-                                .color(if is_loc { Theme::TEXT_PRIMARY } else { Theme::TEXT_MUTED }),
+                                .color(if is_loc { DarkTheme::TEXT_TITLE } else { DarkTheme::TEXT_MUTED }),
                         )
-                        .fill(if is_loc { Theme::SURFACE } else { Color32::TRANSPARENT })
+                        .fill(if is_loc { DarkTheme::CARD_BG } else { Color32::TRANSPARENT })
                         .stroke(if is_loc {
-                            Stroke::new(1.0_f32, Theme::BORDER_SUBTLE)
+                            Stroke::new(1.0_f32, DarkTheme::BORDER_LIGHT)
                         } else {
                             Stroke::NONE
                         })
@@ -733,14 +834,14 @@ impl eframe::App for LocationSimulatorApp {
 
                         let is_routes = self.active_tab == SidebarTab::Routes;
                         let routes_btn = egui::Button::new(
-                            egui::RichText::new("GPX Routes")
-                                .font(FontId::proportional(12.5))
+                            egui::RichText::new("GPX Tracks")
+                                .font(FontId::proportional(12.0))
                                 .strong()
-                                .color(if is_routes { Theme::TEXT_PRIMARY } else { Theme::TEXT_MUTED }),
+                                .color(if is_routes { DarkTheme::TEXT_TITLE } else { DarkTheme::TEXT_MUTED }),
                         )
-                        .fill(if is_routes { Theme::SURFACE } else { Color32::TRANSPARENT })
+                        .fill(if is_routes { DarkTheme::CARD_BG } else { Color32::TRANSPARENT })
                         .stroke(if is_routes {
-                            Stroke::new(1.0_f32, Theme::BORDER_SUBTLE)
+                            Stroke::new(1.0_f32, DarkTheme::BORDER_LIGHT)
                         } else {
                             Stroke::NONE
                         })
@@ -761,15 +862,15 @@ impl eframe::App for LocationSimulatorApp {
                             egui::RichText::new(format!("BOOKMARKS ({})", self.saved_locations.len()))
                                 .font(FontId::proportional(11.0))
                                 .strong()
-                                .color(Theme::TEXT_MUTED),
+                                .color(DarkTheme::TEXT_MUTED),
                         );
 
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ui
                                 .button(
                                     egui::RichText::new("+ Save Current")
-                                        .font(FontId::proportional(11.5))
-                                        .color(Theme::ACCENT_BLUE),
+                                        .font(FontId::proportional(11.0))
+                                        .color(DarkTheme::TEXT_CYAN),
                                 )
                                 .clicked()
                             {
@@ -791,29 +892,31 @@ impl eframe::App for LocationSimulatorApp {
 
                             for loc in &self.saved_locations {
                                 let row = egui::Frame::NONE
-                                    .fill(Theme::SURFACE)
+                                    .fill(DarkTheme::CARD_BG)
                                     .corner_radius(CornerRadius::same(7))
-                                    .stroke(Stroke::new(1.0_f32, Theme::BORDER_SUBTLE))
-                                    .inner_margin(Margin::symmetric(12, 9));
+                                    .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER))
+                                    .inner_margin(Margin::symmetric(12, 8));
 
                                 row.show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         // Category color dot
                                         let cat_color = match loc.category.as_str() {
-                                            "work" => Color32::from_rgb(59, 130, 246),
+                                            "work" => DarkTheme::ACCENT_BLUE,
                                             "home" => Color32::from_rgb(168, 85, 247),
-                                            _ => Color32::from_rgb(100, 116, 139),
+                                            _ => DarkTheme::TEXT_CYAN,
                                         };
 
-                                        ui.label(egui::RichText::new("●").color(cat_color).font(FontId::proportional(10.0)));
+                                        let dot_pos = ui.cursor().min + Vec2::new(3.0, 8.0);
+                                        ui.painter().circle_filled(dot_pos, 3.0_f32, cat_color);
+                                        ui.add_space(12.0);
 
                                         ui.vertical(|ui| {
                                             if ui
                                                 .link(
                                                     egui::RichText::new(&loc.name)
-                                                        .font(FontId::proportional(13.0))
+                                                        .font(FontId::proportional(12.5))
                                                         .strong()
-                                                        .color(Theme::TEXT_PRIMARY),
+                                                        .color(DarkTheme::TEXT_PRIMARY),
                                                 )
                                                 .clicked()
                                             {
@@ -822,22 +925,22 @@ impl eframe::App for LocationSimulatorApp {
 
                                             ui.label(
                                                 egui::RichText::new(format!("{:.4}, {:.4}", loc.latitude, loc.longitude))
-                                                    .font(FontId::monospace(10.5))
-                                                    .color(Theme::TEXT_MUTED),
+                                                    .font(FontId::monospace(10.0))
+                                                    .color(DarkTheme::TEXT_MUTED),
                                             );
                                         });
 
                                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                            if ui.small_button("🗑").on_hover_text("Delete location").clicked() {
+                                            if ui.small_button("✕").on_hover_text("Delete bookmark").clicked() {
                                                 loc_to_remove = Some(loc.id.clone());
                                             }
                                             if ui
                                                 .button(
                                                     egui::RichText::new("Set")
                                                         .font(FontId::proportional(11.0))
-                                                        .color(Theme::ACCENT_BLUE),
+                                                        .color(DarkTheme::TEXT_CYAN),
                                                 )
-                                                .on_hover_text("Teleport device directly to this place")
+                                                .on_hover_text("Teleport directly to this place")
                                                 .clicked()
                                             {
                                                 loc_to_set = Some((loc.latitude, loc.longitude));
@@ -860,19 +963,19 @@ impl eframe::App for LocationSimulatorApp {
                             }
                         });
                 }
-                // TAB 2: GPX TRACKS & ROUTES
+                // TAB 2: GPX TRACKS
                 else {
                     let import_btn = egui::Button::new(
-                        egui::RichText::new("📂 Import GPX File...")
-                            .font(FontId::proportional(13.0))
-                            .color(Theme::ACCENT_BLUE)
+                        egui::RichText::new("Import GPX Route...")
+                            .font(FontId::proportional(12.5))
+                            .color(DarkTheme::TEXT_CYAN)
                             .strong(),
                     )
-                    .fill(Theme::ACCENT_BLUE_BG)
-                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(191, 219, 254)))
+                    .fill(Color32::from_rgb(18, 36, 56))
+                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(30, 60, 96)))
                     .corner_radius(CornerRadius::same(6));
 
-                    if ui.add_sized([ui.available_width(), 32.0], import_btn).clicked() {
+                    if ui.add_sized([ui.available_width(), 30.0], import_btn).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .add_filter("GPX Routes", &["gpx"])
                             .pick_file()
@@ -894,9 +997,9 @@ impl eframe::App for LocationSimulatorApp {
 
                             for route in &self.gpx_routes {
                                 let card = egui::Frame::NONE
-                                    .fill(Theme::SURFACE)
+                                    .fill(DarkTheme::CARD_BG)
                                     .corner_radius(CornerRadius::same(7))
-                                    .stroke(Stroke::new(1.0_f32, Theme::BORDER_SUBTLE))
+                                    .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER))
                                     .inner_margin(Margin::symmetric(12, 10));
 
                                 card.show(ui, |ui| {
@@ -904,26 +1007,26 @@ impl eframe::App for LocationSimulatorApp {
                                         ui.vertical(|ui| {
                                             ui.label(
                                                 egui::RichText::new(&route.name)
-                                                    .font(FontId::proportional(13.0))
+                                                    .font(FontId::proportional(12.5))
                                                     .strong()
-                                                    .color(Theme::TEXT_PRIMARY),
+                                                    .color(DarkTheme::TEXT_PRIMARY),
                                             );
                                             ui.label(
                                                 egui::RichText::new(format!("{} waypoints", route.waypoints.len()))
-                                                    .font(FontId::proportional(11.0))
-                                                    .color(Theme::TEXT_MUTED),
+                                                    .font(FontId::proportional(10.5))
+                                                    .color(DarkTheme::TEXT_MUTED),
                                             );
                                         });
 
                                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                            if ui.small_button("🗑").clicked() {
+                                            if ui.small_button("✕").clicked() {
                                                 route_to_remove = Some(route.id.clone());
                                             }
                                             if ui
                                                 .button(
-                                                    egui::RichText::new("▶ Play")
-                                                        .font(FontId::proportional(11.5))
-                                                        .color(Theme::ACCENT_BLUE),
+                                                    egui::RichText::new("Play")
+                                                        .font(FontId::proportional(11.0))
+                                                        .color(DarkTheme::ACCENT_BLUE),
                                                 )
                                                 .clicked()
                                             {
@@ -947,28 +1050,28 @@ impl eframe::App for LocationSimulatorApp {
                             if self.route_state != "idle" {
                                 ui.add_space(8.0);
                                 let console = egui::Frame::NONE
-                                    .fill(Theme::SURFACE)
+                                    .fill(Color32::from_rgb(20, 26, 38))
                                     .corner_radius(CornerRadius::same(8))
-                                    .stroke(Stroke::new(1.5_f32, Theme::ACCENT_BLUE))
+                                    .stroke(Stroke::new(1.5_f32, DarkTheme::ACCENT_BLUE))
                                     .inner_margin(Margin::symmetric(14, 12));
 
                                 console.show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         ui.label(
-                                            egui::RichText::new("ROUTE PLAYBACK")
-                                                .font(FontId::proportional(10.5))
+                                            egui::RichText::new("ROUTE SIMULATION")
+                                                .font(FontId::proportional(10.0))
                                                 .strong()
-                                                .color(Theme::TEXT_MUTED),
+                                                .color(DarkTheme::TEXT_MUTED),
                                         );
                                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                             let (badge_text, badge_color) = if self.route_state == "running" {
-                                                ("● RUNNING", Theme::SUCCESS_GREEN)
+                                                ("● RUNNING", DarkTheme::ACCENT_GREEN)
                                             } else {
-                                                ("❚❚ PAUSED", Theme::WARNING_AMBER)
+                                                ("❚❚ PAUSED", DarkTheme::ACCENT_AMBER)
                                             };
                                             ui.label(
                                                 egui::RichText::new(badge_text)
-                                                    .font(FontId::proportional(10.5))
+                                                    .font(FontId::proportional(10.0))
                                                     .strong()
                                                     .color(badge_color),
                                             );
@@ -986,11 +1089,11 @@ impl eframe::App for LocationSimulatorApp {
 
                                     ui.label(
                                         egui::RichText::new(format!(
-                                            "Progress: waypoint {} of {}",
+                                            "Waypoint {} / {}",
                                             self.route_progress_current, self.route_progress_total
                                         ))
-                                        .font(FontId::proportional(11.0))
-                                        .color(Theme::TEXT_SECONDARY),
+                                        .font(FontId::proportional(10.5))
+                                        .color(DarkTheme::TEXT_SECONDARY),
                                     );
 
                                     ui.add_space(6.0);
@@ -1016,10 +1119,10 @@ impl eframe::App for LocationSimulatorApp {
             });
 
         // =========================================================================
-        // 4. MAIN MAP CANVAS (OpenStreetMap + Precision Glass HUD)
+        // 4. MAIN MAP CANVAS (CartoDB Dark Matter + Precision Cyan Reticle)
         // =========================================================================
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(Theme::APP_BG))
+            .frame(egui::Frame::NONE.fill(DarkTheme::WINDOW_BG))
             .show(ctx, |ui| {
                 let map = Map::new(Some(&mut self.tiles), &mut self.map_memory, self.pos);
                 let response = ui.add(map);
@@ -1027,58 +1130,58 @@ impl eframe::App for LocationSimulatorApp {
                 let painter = ui.painter_at(response.rect);
                 let center = response.rect.center();
 
-                // Professional Precision Crosshairs with Target Ring
-                let crosshair_color = Color32::from_rgba_unmultiplied(225, 29, 72, 230); // Rose 600
-                let crosshair_stroke = Stroke::new(1.5_f32, crosshair_color);
+                // Avionics Precision Reticle (Electric Cyan #38BDF8)
+                let reticle_color = Color32::from_rgba_unmultiplied(56, 189, 248, 240);
+                let reticle_stroke = Stroke::new(1.5_f32, reticle_color);
 
-                // Horizontal & Vertical Sight Lines
+                // 4-Quadrant Crosshair Ticks
                 painter.line_segment(
                     [
-                        Pos2::new(center.x - 14.0, center.y),
-                        Pos2::new(center.x - 4.0, center.y),
+                        Pos2::new(center.x - 16.0, center.y),
+                        Pos2::new(center.x - 5.0, center.y),
                     ],
-                    crosshair_stroke,
+                    reticle_stroke,
                 );
                 painter.line_segment(
                     [
-                        Pos2::new(center.x + 4.0, center.y),
-                        Pos2::new(center.x + 14.0, center.y),
+                        Pos2::new(center.x + 5.0, center.y),
+                        Pos2::new(center.x + 16.0, center.y),
                     ],
-                    crosshair_stroke,
+                    reticle_stroke,
                 );
                 painter.line_segment(
                     [
-                        Pos2::new(center.x, center.y - 14.0),
-                        Pos2::new(center.x, center.y - 4.0),
+                        Pos2::new(center.x, center.y - 16.0),
+                        Pos2::new(center.x, center.y - 5.0),
                     ],
-                    crosshair_stroke,
+                    reticle_stroke,
                 );
                 painter.line_segment(
                     [
-                        Pos2::new(center.x, center.y + 4.0),
-                        Pos2::new(center.x, center.y + 14.0),
+                        Pos2::new(center.x, center.y + 5.0),
+                        Pos2::new(center.x, center.y + 16.0),
                     ],
-                    crosshair_stroke,
+                    reticle_stroke,
                 );
 
-                // Center Sight Circle (ForeFlight / Avionics style)
-                painter.circle_stroke(center, 4.0_f32, crosshair_stroke);
-                painter.circle_filled(center, 1.5_f32, crosshair_color);
+                // Center Reticle Ring & Dot
+                painter.circle_stroke(center, 4.5_f32, reticle_stroke);
+                painter.circle_filled(center, 1.5_f32, reticle_color);
 
-                // Floating Glassmorphic Coordinates Pill (Bottom Left)
+                // Floating Glassmorphic Coordinates Pill (Dark Frosted Glass)
                 let (lat, lon) = self.current_center_coordinates();
                 let hud_pos = Pos2::new(response.rect.left() + 20.0, response.rect.bottom() - 44.0);
-                let hud_rect = Rect::from_min_size(hud_pos, Vec2::new(220.0, 30.0));
+                let hud_rect = Rect::from_min_size(hud_pos, Vec2::new(230.0, 30.0));
 
                 painter.rect_filled(
                     hud_rect,
                     CornerRadius::same(7),
-                    Color32::from_rgba_unmultiplied(255, 255, 255, 240),
+                    Color32::from_rgba_unmultiplied(17, 20, 27, 235),
                 );
                 painter.rect_stroke(
                     hud_rect,
                     CornerRadius::same(7),
-                    Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(0, 0, 0, 35)),
+                    Stroke::new(1.0_f32, DarkTheme::BORDER_LIGHT),
                     StrokeKind::Outside,
                 );
                 painter.text(
@@ -1086,21 +1189,21 @@ impl eframe::App for LocationSimulatorApp {
                     Align2::CENTER_CENTER,
                     format!("{lat:.6}°, {lon:.6}°"),
                     FontId::monospace(12.0),
-                    Theme::TEXT_PRIMARY,
+                    DarkTheme::TEXT_CYAN,
                 );
 
-                // Floating Zoom Controls (+ / −) Top Right
-                let zoom_top_pos = Pos2::new(response.rect.right() - 44.0, response.rect.top() + 18.0);
-                let zoom_in_rect = Rect::from_min_size(zoom_top_pos, Vec2::new(28.0, 28.0));
-                let zoom_out_rect = Rect::from_min_size(zoom_top_pos + Vec2::new(0.0, 32.0), Vec2::new(28.0, 28.0));
+                // Floating Zoom Controls (+ / −)
+                let zoom_top_pos = Pos2::new(response.rect.right() - 46.0, response.rect.top() + 18.0);
+                let zoom_in_rect = Rect::from_min_size(zoom_top_pos, Vec2::new(30.0, 30.0));
+                let zoom_out_rect = Rect::from_min_size(zoom_top_pos + Vec2::new(0.0, 34.0), Vec2::new(30.0, 30.0));
 
-                painter.rect_filled(zoom_in_rect, CornerRadius::same(5), Theme::SURFACE);
-                painter.rect_stroke(zoom_in_rect, CornerRadius::same(5), Stroke::new(1.0_f32, Theme::BORDER_SUBTLE), StrokeKind::Outside);
-                painter.text(zoom_in_rect.center(), Align2::CENTER_CENTER, "+", FontId::proportional(16.0), Theme::TEXT_PRIMARY);
+                painter.rect_filled(zoom_in_rect, CornerRadius::same(5), DarkTheme::CARD_BG);
+                painter.rect_stroke(zoom_in_rect, CornerRadius::same(5), Stroke::new(1.0_f32, DarkTheme::BORDER), StrokeKind::Outside);
+                painter.text(zoom_in_rect.center(), Align2::CENTER_CENTER, "+", FontId::proportional(17.0), DarkTheme::TEXT_PRIMARY);
 
-                painter.rect_filled(zoom_out_rect, CornerRadius::same(5), Theme::SURFACE);
-                painter.rect_stroke(zoom_out_rect, CornerRadius::same(5), Stroke::new(1.0_f32, Theme::BORDER_SUBTLE), StrokeKind::Outside);
-                painter.text(zoom_out_rect.center(), Align2::CENTER_CENTER, "−", FontId::proportional(16.0), Theme::TEXT_PRIMARY);
+                painter.rect_filled(zoom_out_rect, CornerRadius::same(5), DarkTheme::CARD_BG);
+                painter.rect_stroke(zoom_out_rect, CornerRadius::same(5), Stroke::new(1.0_f32, DarkTheme::BORDER), StrokeKind::Outside);
+                painter.text(zoom_out_rect.center(), Align2::CENTER_CENTER, "−", FontId::proportional(17.0), DarkTheme::TEXT_PRIMARY);
 
                 if response.clicked() {
                     if let Some(pos) = response.interact_pointer_pos() {
@@ -1114,7 +1217,7 @@ impl eframe::App for LocationSimulatorApp {
             });
 
         // =========================================================================
-        // 5. NATIVE MODAL WINDOWS
+        // 5. DARK MODAL WINDOWS
         // =========================================================================
 
         if self.show_password_modal {
@@ -1123,14 +1226,25 @@ impl eframe::App for LocationSimulatorApp {
                 .resizable(false)
                 .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
-                    ui.label("iOS 17+ devices require root permissions to initialize the RemoteXPC tunnel daemon.");
+                    ui.label(
+                        egui::RichText::new("iOS 17+ devices require root permissions to initialize the RemoteXPC tunnel daemon.")
+                            .color(DarkTheme::TEXT_SECONDARY),
+                    );
                     ui.add_space(8.0);
-                    ui.label("Password:");
+                    ui.label(egui::RichText::new("Password:").color(DarkTheme::TEXT_PRIMARY));
                     ui.add(egui::TextEdit::singleline(&mut self.password_input).password(true));
 
                     ui.add_space(14.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Authenticate").clicked() {
+                        let auth_btn = egui::Button::new(
+                            egui::RichText::new("Authenticate")
+                                .strong()
+                                .color(Color32::WHITE),
+                        )
+                        .fill(DarkTheme::ACCENT_BLUE)
+                        .corner_radius(CornerRadius::same(6));
+
+                        if ui.add(auth_btn).clicked() {
                             self.daemon.submit_tunnel_password(&self.password_input);
                             self.password_input.clear();
                             self.show_password_modal = false;
@@ -1150,7 +1264,7 @@ impl eframe::App for LocationSimulatorApp {
                 .resizable(false)
                 .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
-                    ui.label("Bookmark Name:");
+                    ui.label(egui::RichText::new("Bookmark Name:").color(DarkTheme::TEXT_PRIMARY));
                     ui.text_edit_singleline(&mut self.save_name_input);
 
                     ui.add_space(6.0);
@@ -1158,12 +1272,20 @@ impl eframe::App for LocationSimulatorApp {
                     ui.label(
                         egui::RichText::new(format!("Target: {lat:.6}°, {lon:.6}°"))
                             .font(FontId::monospace(11.0))
-                            .color(Theme::TEXT_MUTED),
+                            .color(DarkTheme::TEXT_CYAN),
                     );
 
                     ui.add_space(14.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Save").clicked() {
+                        let save_btn = egui::Button::new(
+                            egui::RichText::new("Save")
+                                .strong()
+                                .color(Color32::WHITE),
+                        )
+                        .fill(DarkTheme::ACCENT_BLUE)
+                        .corner_radius(CornerRadius::same(6));
+
+                        if ui.add(save_btn).clicked() {
                             if !self.save_name_input.trim().is_empty() {
                                 self.daemon.add_saved_location(
                                     &self.save_name_input,
@@ -1192,16 +1314,17 @@ impl eframe::App for LocationSimulatorApp {
                         egui::RichText::new("Location Simulator")
                             .font(FontId::proportional(16.0))
                             .strong()
-                            .color(Theme::TEXT_PRIMARY),
+                            .color(DarkTheme::TEXT_TITLE),
                     );
                     ui.label(
-                        egui::RichText::new("Native Rust Edition · v1.0.0")
+                        egui::RichText::new("Native Rust Edition · Dark Mode")
                             .font(FontId::proportional(12.0))
-                            .color(Theme::TEXT_MUTED),
+                            .color(DarkTheme::TEXT_CYAN),
                     );
                     ui.add_space(10.0);
                     ui.label("High-performance iOS Location Simulation tool.");
                     ui.label("• Rendering: Pure Rust GPU (Metal/OpenGL)");
+                    ui.label("• Map Tiles: CartoDB Dark Matter");
                     ui.label("• Device Protocol: pymobiledevice3 async daemon");
                     ui.label("• iOS Support: iOS 12.0 – iOS 18+ (RemoteXPC Tunnel)");
                     ui.add_space(14.0);
