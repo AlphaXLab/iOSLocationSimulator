@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Optional, Callable, List, Tuple
 from enum import Enum
 
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
+from .qt_compat import QObject, pyqtSignal, QTimer
 
 from .device_manager import iOSDevice
 

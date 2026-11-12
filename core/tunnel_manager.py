@@ -10,7 +10,7 @@ import time
 import shutil
 from typing import Optional
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from .qt_compat import QObject, pyqtSignal
 
 logger = logging.getLogger(__name__)
 

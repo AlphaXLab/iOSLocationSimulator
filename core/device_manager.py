@@ -9,7 +9,7 @@ from enum import Enum
 import threading
 import time
 
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
+from .qt_compat import QObject, pyqtSignal, QTimer
 
 
 class ConnectionType(Enum):

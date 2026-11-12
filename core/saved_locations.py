@@ -10,7 +10,7 @@ from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, pyqtSignal, QStandardPaths
+from .qt_compat import QObject, pyqtSignal, QStandardPaths
 
 from .location_controller import Coordinate
 

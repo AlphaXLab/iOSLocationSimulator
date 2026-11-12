@@ -2,7 +2,7 @@
 Settings Manager - Manages application settings and preferences
 """
 
-from PyQt6.QtCore import QSettings
+from .qt_compat import QSettings
 
 
 class SettingsManager:
