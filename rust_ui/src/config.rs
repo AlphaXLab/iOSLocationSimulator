@@ -6,6 +6,24 @@ use std::path::{Path, PathBuf};
 pub struct AppConfig {
     pub google_maps_api_key: String,
     pub map_style: String,
+    #[serde(default = "default_lat")]
+    pub last_lat: f64,
+    #[serde(default = "default_lon")]
+    pub last_lon: f64,
+    #[serde(default = "default_zoom")]
+    pub last_zoom: f64,
+}
+
+fn default_lat() -> f64 {
+    37.7749
+}
+
+fn default_lon() -> f64 {
+    -122.4194
+}
+
+fn default_zoom() -> f64 {
+    14.0
 }
 
 impl Default for AppConfig {
@@ -13,6 +31,9 @@ impl Default for AppConfig {
         Self {
             google_maps_api_key: String::new(),
             map_style: "google".to_string(),
+            last_lat: default_lat(),
+            last_lon: default_lon(),
+            last_zoom: default_zoom(),
         }
     }
 }

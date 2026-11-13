@@ -135,13 +135,16 @@ impl DaemonClient {
 
         if let Ok(exe) = std::env::current_exe() {
             if let Some(parent) = exe.parent() {
-                let candidate = parent.join("core_daemon.py");
-                if candidate.exists() {
-                    return Ok(candidate);
-                }
-                let candidate2 = parent.join("../core_daemon.py");
-                if candidate2.exists() {
-                    return Ok(candidate2);
+                for candidate in &[
+                    parent.join("core_daemon.py"),
+                    parent.join("../Resources/core_daemon.py"),
+                    parent.join("../core_daemon.py"),
+                    parent.join("../../core_daemon.py"),
+                    parent.join("../../../core_daemon.py"),
+                ] {
+                    if candidate.exists() {
+                        return Ok(candidate.clone());
+                    }
                 }
             }
         }
@@ -160,7 +163,15 @@ impl DaemonClient {
 
         // 2. Check relative to daemon_script parent
         if let Some(parent) = daemon_script.parent() {
-            for sub in &["venv/bin/python3", ".venv/bin/python3", "venv/bin/python", ".venv/bin/python"] {
+            for sub in &[
+                "venv/bin/python3",
+                ".venv/bin/python3",
+                "../Resources/venv/bin/python3",
+                "../venv/bin/python3",
+                "../../venv/bin/python3",
+                "venv/bin/python",
+                ".venv/bin/python",
+            ] {
                 let p = parent.join(sub);
                 if p.exists() {
                     return p;

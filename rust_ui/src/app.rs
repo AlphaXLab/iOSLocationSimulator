@@ -173,27 +173,59 @@ impl LocationSimulatorApp {
             cache: dirs_cache_dir(),
             ..Default::default()
         };
-        // Default to Google Maps Roadmap
-        let tiles = HttpTiles::with_options(
-            GoogleMapsSource {
-                api_key: config.google_maps_api_key.clone(),
-                layer: "m",
-            },
-            http_options,
-            cc.egui_ctx.to_owned(),
-        );
 
-        let initial_lat = 37.7749;
-        let initial_lon = -122.4194;
+        let initial_lat = if config.last_lat != 0.0 { config.last_lat } else { 37.7749 };
+        let initial_lon = if config.last_lon != 0.0 { config.last_lon } else { -122.4194 };
         let pos = lat_lon(initial_lat, initial_lon);
+
+        let mut map_memory = MapMemory::default();
+        if config.last_zoom > 0.0 {
+            let _ = map_memory.set_zoom(config.last_zoom);
+        }
+
+        let map_style = match config.map_style.as_str() {
+            "hybrid" => MapStyle::Hybrid,
+            "osm" => MapStyle::Osm,
+            "dark" => MapStyle::Dark,
+            _ => MapStyle::Google,
+        };
+
+        let tiles = match map_style {
+            MapStyle::Google => {
+                HttpTiles::with_options(
+                    GoogleMapsSource {
+                        api_key: config.google_maps_api_key.clone(),
+                        layer: "m",
+                    },
+                    http_options,
+                    cc.egui_ctx.to_owned(),
+                )
+            }
+            MapStyle::Hybrid => {
+                HttpTiles::with_options(
+                    GoogleMapsSource {
+                        api_key: config.google_maps_api_key.clone(),
+                        layer: "y",
+                    },
+                    http_options,
+                    cc.egui_ctx.to_owned(),
+                )
+            }
+            MapStyle::Osm => {
+                HttpTiles::with_options(OpenStreetMapSource, http_options, cc.egui_ctx.to_owned())
+            }
+            MapStyle::Dark => {
+                HttpTiles::with_options(ArcGisDark, http_options, cc.egui_ctx.to_owned())
+            }
+        };
 
         Self {
             daemon,
             geocoding,
             tiles,
-            map_memory: MapMemory::default(),
+            map_memory,
             pos,
-            map_style: MapStyle::Google,
+            map_style,
             egui_ctx: cc.egui_ctx.clone(),
             config,
             show_api_key_modal,
@@ -234,6 +266,13 @@ impl LocationSimulatorApp {
             return;
         }
         self.map_style = style;
+        self.config.map_style = match style {
+            MapStyle::Google => "google".to_string(),
+            MapStyle::Hybrid => "hybrid".to_string(),
+            MapStyle::Osm => "osm".to_string(),
+            MapStyle::Dark => "dark".to_string(),
+        };
+        self.config.save();
         let http_options = HttpOptions {
             cache: dirs_cache_dir(),
             ..Default::default()
@@ -273,11 +312,23 @@ impl LocationSimulatorApp {
         (p.y(), p.x())
     }
 
+    fn save_current_location(&mut self) {
+        let (lat, lon) = self.current_center_coordinates();
+        self.config.last_lat = lat;
+        self.config.last_lon = lon;
+        self.config.last_zoom = self.map_memory.zoom();
+        self.config.save();
+    }
+
     fn jump_to(&mut self, lat: f64, lon: f64) {
         self.pos = lat_lon(lat, lon);
         self.map_memory.center_at(self.pos);
         self.status_message = format!("Centered at {lat:.6}, {lon:.6}");
         self.status_is_error = false;
+        self.config.last_lat = lat;
+        self.config.last_lon = lon;
+        self.config.last_zoom = self.map_memory.zoom();
+        self.config.save();
     }
 
     fn poll_background_events(&mut self) {
@@ -445,6 +496,7 @@ impl eframe::App for LocationSimulatorApp {
                             self.daemon.set_location(self.selected_udid.as_deref(), cur_lat, cur_lon);
                             self.status_message = format!("Simulating position: {cur_lat:.5}, {cur_lon:.5}...");
                             self.status_is_error = false;
+                            self.save_current_location();
                         }
 
                         ui.add_space(10.0);
@@ -1442,5 +1494,19 @@ impl eframe::App for LocationSimulatorApp {
                     });
                 });
         }
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        let (lat, lon) = self.current_center_coordinates();
+        self.config.last_lat = lat;
+        self.config.last_lon = lon;
+        self.config.last_zoom = self.map_memory.zoom();
+        self.config.map_style = match self.map_style {
+            MapStyle::Google => "google".to_string(),
+            MapStyle::Hybrid => "hybrid".to_string(),
+            MapStyle::Osm => "osm".to_string(),
+            MapStyle::Dark => "dark".to_string(),
+        };
+        self.config.save();
     }
 }
