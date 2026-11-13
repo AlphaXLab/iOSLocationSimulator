@@ -48,6 +48,11 @@ htmlcov/
 *.egg-info/
 *.egg
 
+# Environment variables
+.env
+.env.*
+!.env.example
+
 # Rust
 target/
 rust_ui/target/
