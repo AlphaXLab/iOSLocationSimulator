@@ -18,6 +18,7 @@ enum SidebarTab {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum MapStyle {
+    Street,
     Dark,
     Osm,
     Satellite,
@@ -29,7 +30,31 @@ pub enum MapStyle {
 
 const CARTO_API_KEY: &str = "cb1_5809_1_802d6217ff1f677f9514472e";
 
-/// CartoDB Dark Matter with authenticated API key (clean, watermark-free dark theme)
+/// CartoDB Voyager: crisp, modern, high-contrast street map with clear labels & landmarks
+#[derive(Clone, Copy, Default)]
+pub struct CartoVoyager;
+
+impl walkers::sources::TileSource for CartoVoyager {
+    fn tile_url(&self, tile_id: TileId) -> String {
+        let servers = ['a', 'b', 'c', 'd'];
+        let s = servers[(tile_id.x + tile_id.y) as usize % servers.len()];
+        format!(
+            "https://{}.basemaps.cartocdn.com/rastertiles/voyager/{}/{}/{}.png?key={}",
+            s, tile_id.zoom, tile_id.x, tile_id.y, CARTO_API_KEY
+        )
+    }
+
+    fn attribution(&self) -> walkers::sources::Attribution {
+        walkers::sources::Attribution {
+            text: "© OpenStreetMap contributors © CARTO",
+            url: "https://carto.com/attributions",
+            logo_light: None,
+            logo_dark: None,
+        }
+    }
+}
+
+/// CartoDB Dark Matter with authenticated API key (ultra-dark night theme)
 #[derive(Clone, Copy, Default)]
 pub struct CartoDark;
 
@@ -156,8 +181,8 @@ impl LocationSimulatorApp {
             cache: dirs_cache_dir(),
             ..Default::default()
         };
-        // Default to CartoDB Dark Matter with authenticated API key
-        let tiles = HttpTiles::with_options(CartoDark, http_options, cc.egui_ctx.to_owned());
+        // Default to CartoDB Voyager: crisp, modern, high-contrast street map with clear labels & landmarks
+        let tiles = HttpTiles::with_options(CartoVoyager, http_options, cc.egui_ctx.to_owned());
 
         let initial_lat = 37.7749;
         let initial_lon = -122.4194;
@@ -169,7 +194,7 @@ impl LocationSimulatorApp {
             tiles,
             map_memory: MapMemory::default(),
             pos,
-            map_style: MapStyle::Dark,
+            map_style: MapStyle::Street,
             egui_ctx: cc.egui_ctx.clone(),
             devices: Vec::new(),
             selected_udid: None,
@@ -211,6 +236,9 @@ impl LocationSimulatorApp {
             ..Default::default()
         };
         self.tiles = match style {
+            MapStyle::Street => {
+                HttpTiles::with_options(CartoVoyager, http_options, self.egui_ctx.clone())
+            }
             MapStyle::Dark => {
                 HttpTiles::with_options(CartoDark, http_options, self.egui_ctx.clone())
             }
@@ -903,22 +931,25 @@ impl eframe::App for LocationSimulatorApp {
                 let painter = ui.painter_at(response.rect);
                 let center = response.rect.center();
 
-                // TableX Precision Reticle (Accent Blue #4C8DFF)
+                // High-visibility Precision Reticle (Dual-tone for clarity on both light and dark maps)
+                let halo_stroke = Stroke::new(2.5_f32, Color32::from_black_alpha(180));
+                painter.line_segment([Pos2::new(center.x - 14.0, center.y), Pos2::new(center.x - 4.0, center.y)], halo_stroke);
+                painter.line_segment([Pos2::new(center.x + 4.0, center.y), Pos2::new(center.x + 14.0, center.y)], halo_stroke);
+                painter.line_segment([Pos2::new(center.x, center.y - 14.0), Pos2::new(center.x, center.y - 4.0)], halo_stroke);
+                painter.line_segment([Pos2::new(center.x, center.y + 4.0), Pos2::new(center.x, center.y + 14.0)], halo_stroke);
+                painter.circle_stroke(center, 4.0_f32, halo_stroke);
+
                 let reticle_color = pal.accent;
                 let reticle_stroke = Stroke::new(1.5_f32, reticle_color);
-
-                // Crosshair sight ticks
                 painter.line_segment([Pos2::new(center.x - 14.0, center.y), Pos2::new(center.x - 4.0, center.y)], reticle_stroke);
                 painter.line_segment([Pos2::new(center.x + 4.0, center.y), Pos2::new(center.x + 14.0, center.y)], reticle_stroke);
                 painter.line_segment([Pos2::new(center.x, center.y - 14.0), Pos2::new(center.x, center.y - 4.0)], reticle_stroke);
                 painter.line_segment([Pos2::new(center.x, center.y + 4.0), Pos2::new(center.x, center.y + 14.0)], reticle_stroke);
-
-                // Center Reticle Ring & Dot
                 painter.circle_stroke(center, 4.0_f32, reticle_stroke);
                 painter.circle_filled(center, 1.5_f32, reticle_color);
 
-                // Floating Zoom Controls (+ / −) on right
-                let zoom_top_pos = Pos2::new(response.rect.right() - 44.0, response.rect.top() + 20.0);
+                // Floating Zoom Controls (+ / −) on right (comfortably below style switcher)
+                let zoom_top_pos = Pos2::new(response.rect.right() - 44.0, response.rect.top() + 62.0);
                 let zoom_in_rect = Rect::from_min_size(zoom_top_pos, Vec2::new(28.0, 28.0));
                 let zoom_out_rect = Rect::from_min_size(zoom_top_pos + Vec2::new(0.0, 32.0), Vec2::new(28.0, 28.0));
 
@@ -941,10 +972,10 @@ impl eframe::App for LocationSimulatorApp {
                 }
 
                 // =========================================================================
-                // FLOATING MAP STYLE SWITCHER (Dark / OSM / Sat) Top-Right of Map
+                // FLOATING MAP STYLE SWITCHER (Street / Dark / OSM / Sat) Top-Right
                 // =========================================================================
-                let style_pos = Pos2::new(response.rect.right() - 210.0, response.rect.top() + 20.0);
-                let style_rect = Rect::from_min_size(style_pos, Vec2::new(154.0, 30.0));
+                let style_pos = Pos2::new(response.rect.right() - 216.0, response.rect.top() + 20.0);
+                let style_rect = Rect::from_min_size(style_pos, Vec2::new(196.0, 30.0));
 
                 painter.rect_filled(style_rect, CornerRadius::same(theme::RADIUS_SM), pal.elevated);
                 painter.rect_stroke(style_rect, CornerRadius::same(theme::RADIUS_SM), Stroke::new(1.0_f32, pal.separator), StrokeKind::Inside);
@@ -957,6 +988,7 @@ impl eframe::App for LocationSimulatorApp {
                 style_ui.spacing_mut().item_spacing.x = 2.0;
 
                 let styles = [
+                    (MapStyle::Street, "Street"),
                     (MapStyle::Dark, "Dark"),
                     (MapStyle::Osm, "OSM"),
                     (MapStyle::Satellite, "Sat"),
@@ -971,7 +1003,7 @@ impl eframe::App for LocationSimulatorApp {
                     .fill(if is_active { pal.selection } else { Color32::TRANSPARENT })
                     .corner_radius(CornerRadius::same(theme::RADIUS_SM));
 
-                    if style_ui.add_sized([48.0, 26.0], btn).clicked() {
+                    if style_ui.add_sized([46.0, 26.0], btn).clicked() {
                         self.set_map_style(style);
                     }
                 }
