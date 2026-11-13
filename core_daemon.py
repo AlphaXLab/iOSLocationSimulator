@@ -302,6 +302,12 @@ class CoreDaemon:
             }
         })
 
+        # Emit initial tunnel status
+        if self.tunnel_manager.is_running:
+            emit_event("tunnel_status", {"status": "started", "running": True})
+        else:
+            emit_event("tunnel_status", {"status": "stopped", "running": False})
+
         # Process commands from stdin
         for line in sys.stdin:
             line = line.strip()

@@ -379,7 +379,8 @@ impl LocationSimulatorApp {
                         if err.contains("password") || err.contains("Authentication") || err.contains("sudo") {
                             self.show_password_modal = true;
                         }
-                        self.status_message = format!("Tunnel: {err}");
+                        let clean_err = err.lines().find(|l| !l.trim().is_empty()).unwrap_or(err).trim();
+                        self.status_message = format!("Tunnel: {clean_err}");
                         self.status_is_error = true;
                         self.is_tunnel_starting = false;
                     } else if status.status.as_deref() == Some("stopped") {
@@ -400,7 +401,8 @@ impl LocationSimulatorApp {
                     self.gpx_routes = routes;
                 }
                 DaemonEvent::Error(message) => {
-                    self.status_message = format!("Error: {message}");
+                    let clean = message.lines().find(|l| !l.trim().is_empty()).unwrap_or(&message).trim();
+                    self.status_message = format!("Error: {clean}");
                     self.status_is_error = true;
                 }
             }
@@ -481,11 +483,25 @@ impl eframe::App for LocationSimulatorApp {
 
                     // Status Message + Realtime Map Coordinates
                     let (cur_lat, cur_lon) = self.current_center_coordinates();
-                    ui.label(
-                        egui::RichText::new(&self.status_message)
-                            .font(theme::ui(13.0))
-                            .color(if self.status_is_error { pal.danger } else { pal.text }),
+                    let raw_msg = &self.status_message;
+                    let single_line = raw_msg.replace('\n', " ").replace('\r', "");
+                    let truncated = if single_line.len() > 70 {
+                        format!("{}...", &single_line[..67])
+                    } else {
+                        single_line.clone()
+                    };
+
+                    let label_resp = ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&truncated)
+                                .font(theme::ui(13.0))
+                                .color(if self.status_is_error { pal.danger } else { pal.text }),
+                        )
+                        .truncate(),
                     );
+                    if raw_msg.len() > truncated.len() || raw_msg.contains('\n') {
+                        label_resp.on_hover_text(raw_msg);
+                    }
 
                     ui.add_space(10.0);
                     ui.label(

@@ -84,6 +84,19 @@ def _get_python_executable():
         return sys.executable
 
 
+def is_tunneld_listening(port: int = 49151) -> bool:
+    """Check if pymobiledevice3 tunneld is already listening on local port"""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(0.5)
+    try:
+        return s.connect_ex(('127.0.0.1', port)) == 0
+    except Exception:
+        return False
+    finally:
+        s.close()
+
+
 class TunnelManager(QObject):
     """Manages the RemoteXPC tunnel process for iOS 17+ devices"""
 
@@ -98,18 +111,42 @@ class TunnelManager(QObject):
         super().__init__()
         self._process: Optional[subprocess.Popen] = None
         self._monitor_thread: Optional[threading.Thread] = None
-        self._is_running = False
+        self._is_running = is_tunneld_listening()
         self._is_starting = False  # Track if we're currently trying to start
 
     @property
     def is_running(self) -> bool:
         """Check if tunnel is running"""
-        return self._is_running and self._process is not None and self._process.poll() is None
+        if self._is_running and self._process is not None and self._process.poll() is None:
+            return True
+        return is_tunneld_listening()
+
+    def _format_clean_error(self, stderr: str) -> str:
+        """Extract a concise single-line error message from process stderr"""
+        if not stderr:
+            return "Tunnel failed to start"
+        lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+        error_lines = [
+            l for l in lines 
+            if l.startswith("ERROR:") or "Error" in l or "Errno" in l or "Exception" in l or "failed" in l.lower()
+        ]
+        if error_lines:
+            last_err = error_lines[-1]
+            if last_err.startswith("ERROR:"):
+                last_err = last_err[6:].strip()
+            return last_err
+        for l in reversed(lines):
+            if not l.startswith("INFO:") and not l.startswith("WARNING:") and "predates altIRK" not in l:
+                return l
+        return lines[-1] if lines else "Tunnel failed to start"
 
     def start_tunnel(self):
         """Start the RemoteXPC tunnel in background"""
-        if self.is_running:
-            logger.info("Tunnel already running")
+        if self.is_running or is_tunneld_listening():
+            logger.info("Tunnel already running on localhost:49151")
+            self._is_running = True
+            self._is_starting = False
+            self.tunnel_started.emit()
             return
 
         if self._is_starting:
@@ -151,6 +188,15 @@ class TunnelManager(QObject):
                 # Start monitor thread
                 self._monitor_thread = threading.Thread(target=self._monitor_tunnel, daemon=True)
                 self._monitor_thread.start()
+                return
+
+            # If died, check if it failed because tunneld is ALREADY listening on port 49151
+            stderr = self._process.stderr.read() if self._process.stderr else ""
+            if "address already in use" in stderr.lower() or "errno 48" in stderr.lower() or is_tunneld_listening():
+                self._is_running = True
+                self._is_starting = False
+                logger.info("Tunnel daemon already running on port 49151")
+                self.tunnel_started.emit()
                 return
 
             # Check if a password is saved in macOS Keychain
@@ -220,10 +266,16 @@ class TunnelManager(QObject):
                 self._is_starting = False
                 logger.error(f"Tunnel failed to start: {stderr}")
 
+                if "address already in use" in stderr.lower() or "errno 48" in stderr.lower() or is_tunneld_listening():
+                    self._is_running = True
+                    logger.info("Tunnel daemon already running on port 49151")
+                    self.tunnel_started.emit()
+                    return True
+
                 if "Sorry, try again" in stderr or "incorrect password" in stderr.lower():
                     self.tunnel_error.emit("Incorrect password. Please try again.")
                 else:
-                    self.tunnel_error.emit(f"Failed to start tunnel: {stderr}")
+                    self.tunnel_error.emit(self._format_clean_error(stderr))
                 return False
 
         except Exception as e:
@@ -264,21 +316,29 @@ class TunnelManager(QObject):
 
     def stop_tunnel(self):
         """Stop the tunnel process"""
-        if not self._process:
-            return
-
         try:
             logger.info("Stopping tunnel...")
 
-            if self._process.poll() is None:
+            if self._process and self._process.poll() is None:
                 self._process.terminate()
-
-                # Wait for graceful shutdown
                 try:
-                    self._process.wait(timeout=5)
+                    self._process.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     logger.warning("Tunnel didn't stop gracefully, killing...")
                     self._process.kill()
+
+            if is_tunneld_listening():
+                saved_pwd = _get_keychain_password()
+                if saved_pwd:
+                    subprocess.run(
+                        ['sudo', '-S', 'pkill', '-f', 'pymobiledevice3 remote tunneld'],
+                        input=saved_pwd + '\n',
+                        text=True,
+                        capture_output=True,
+                        timeout=5
+                    )
+                else:
+                    subprocess.run(['pkill', '-f', 'pymobiledevice3 remote tunneld'], capture_output=True, timeout=5)
 
             self._is_running = False
             self._process = None
