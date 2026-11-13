@@ -983,18 +983,67 @@ impl eframe::App for LocationSimulatorApp {
                 painter.circle_stroke(center, 4.0_f32, reticle_stroke);
                 painter.circle_filled(center, 1.5_f32, reticle_color);
 
-                // Floating Zoom Controls (+ / −) on right (comfortably below style switcher)
-                let zoom_top_pos = Pos2::new(response.rect.right() - 44.0, response.rect.top() + 62.0);
-                let zoom_in_rect = Rect::from_min_size(zoom_top_pos, Vec2::new(28.0, 28.0));
-                let zoom_out_rect = Rect::from_min_size(zoom_top_pos + Vec2::new(0.0, 32.0), Vec2::new(28.0, 28.0));
+                // =========================================================================
+                // FLOATING MAP STYLE SWITCHER (Google / Hybrid / OSM / Dark) Top-Right
+                // =========================================================================
+                let style_pos = Pos2::new(response.rect.right() - 270.0, response.rect.top() + 20.0);
+                let style_rect = Rect::from_min_size(style_pos, Vec2::new(252.0, 36.0));
 
-                painter.rect_filled(zoom_in_rect, CornerRadius::same(theme::RADIUS_SM), pal.elevated);
-                painter.rect_stroke(zoom_in_rect, CornerRadius::same(theme::RADIUS_SM), Stroke::new(1.0_f32, pal.separator), StrokeKind::Inside);
-                painter.text(zoom_in_rect.center(), Align2::CENTER_CENTER, "+", theme::semi(15.0), pal.text);
+                painter.rect_filled(
+                    style_rect.translate(Vec2::new(0.0, 2.0)),
+                    CornerRadius::same(theme::RADIUS_MD),
+                    Color32::from_black_alpha(50),
+                );
+                painter.rect_filled(style_rect, CornerRadius::same(theme::RADIUS_MD), pal.elevated);
+                painter.rect_stroke(style_rect, CornerRadius::same(theme::RADIUS_MD), Stroke::new(1.0_f32, pal.separator), StrokeKind::Inside);
 
-                painter.rect_filled(zoom_out_rect, CornerRadius::same(theme::RADIUS_SM), pal.elevated);
-                painter.rect_stroke(zoom_out_rect, CornerRadius::same(theme::RADIUS_SM), Stroke::new(1.0_f32, pal.separator), StrokeKind::Inside);
-                painter.text(zoom_out_rect.center(), Align2::CENTER_CENTER, "−", theme::semi(15.0), pal.text);
+                let mut style_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(style_rect.shrink(3.0))
+                        .layout(Layout::left_to_right(Align::Center)),
+                );
+                style_ui.spacing_mut().item_spacing.x = 2.0;
+                style_ui.spacing_mut().interact_size = egui::vec2(20.0, 28.0);
+                style_ui.spacing_mut().button_padding = egui::vec2(6.0, 2.0);
+
+                let styles = [
+                    (MapStyle::Google, "Google"),
+                    (MapStyle::Hybrid, "Hybrid"),
+                    (MapStyle::Osm, "OSM"),
+                    (MapStyle::Dark, "Dark"),
+                ];
+                for (style, label) in styles {
+                    let is_active = self.map_style == style;
+                    let btn = egui::Button::new(
+                        egui::RichText::new(label)
+                            .font(theme::semi(11.5))
+                            .color(if is_active { pal.accent } else { pal.text_muted }),
+                    )
+                    .fill(if is_active { pal.selection } else { Color32::TRANSPARENT })
+                    .stroke(Stroke::NONE)
+                    .corner_radius(CornerRadius::same(theme::RADIUS_SM));
+
+                    if style_ui.add_sized([58.0, 28.0], btn).clicked() {
+                        self.set_map_style(style);
+                    }
+                }
+
+                // =========================================================================
+                // FLOATING ZOOM CONTROLS (+ / −) Bottom-Right (Google Maps Style)
+                // =========================================================================
+                let zoom_bottom_pos = Pos2::new(response.rect.right() - 50.0, response.rect.bottom() - 110.0);
+                let zoom_in_rect = Rect::from_min_size(zoom_bottom_pos, Vec2::new(34.0, 34.0));
+                let zoom_out_rect = Rect::from_min_size(zoom_bottom_pos + Vec2::new(0.0, 40.0), Vec2::new(34.0, 34.0));
+
+                painter.rect_filled(zoom_in_rect.translate(Vec2::new(0.0, 2.0)), CornerRadius::same(theme::RADIUS_MD), Color32::from_black_alpha(50));
+                painter.rect_filled(zoom_in_rect, CornerRadius::same(theme::RADIUS_MD), pal.elevated);
+                painter.rect_stroke(zoom_in_rect, CornerRadius::same(theme::RADIUS_MD), Stroke::new(1.0_f32, pal.separator), StrokeKind::Inside);
+                painter.text(zoom_in_rect.center(), Align2::CENTER_CENTER, "+", theme::semi(18.0), pal.text);
+
+                painter.rect_filled(zoom_out_rect.translate(Vec2::new(0.0, 2.0)), CornerRadius::same(theme::RADIUS_MD), Color32::from_black_alpha(50));
+                painter.rect_filled(zoom_out_rect, CornerRadius::same(theme::RADIUS_MD), pal.elevated);
+                painter.rect_stroke(zoom_out_rect, CornerRadius::same(theme::RADIUS_MD), Stroke::new(1.0_f32, pal.separator), StrokeKind::Inside);
+                painter.text(zoom_out_rect.center(), Align2::CENTER_CENTER, "−", theme::semi(18.0), pal.text);
 
                 if response.clicked() {
                     if let Some(pos) = response.interact_pointer_pos() {
@@ -1007,39 +1056,36 @@ impl eframe::App for LocationSimulatorApp {
                 }
 
                 // =========================================================================
-                // FLOATING MAP STYLE SWITCHER (Google / Hybrid / OSM / Dark) Top-Right
+                // INTERACTIVE PINNING: Double-Click or Right-Click anywhere on Map
                 // =========================================================================
-                let style_pos = Pos2::new(response.rect.right() - 250.0, response.rect.top() + 20.0);
-                let style_rect = Rect::from_min_size(style_pos, Vec2::new(236.0, 30.0));
-
-                painter.rect_filled(style_rect, CornerRadius::same(theme::RADIUS_SM), pal.elevated);
-                painter.rect_stroke(style_rect, CornerRadius::same(theme::RADIUS_SM), Stroke::new(1.0_f32, pal.separator), StrokeKind::Inside);
-
-                let mut style_ui = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(style_rect.shrink(2.0))
-                        .layout(Layout::left_to_right(Align::Center)),
-                );
-                style_ui.spacing_mut().item_spacing.x = 2.0;
-
-                let styles = [
-                    (MapStyle::Google, "Google"),
-                    (MapStyle::Hybrid, "Hybrid"),
-                    (MapStyle::Osm, "OSM"),
-                    (MapStyle::Dark, "Dark"),
-                ];
-                for (style, label) in styles {
-                    let is_active = self.map_style == style;
-                    let btn = egui::Button::new(
-                        egui::RichText::new(label)
-                            .font(theme::semi(11.0))
-                            .color(if is_active { pal.accent } else { pal.text_muted }),
-                    )
-                    .fill(if is_active { pal.selection } else { Color32::TRANSPARENT })
-                    .corner_radius(CornerRadius::same(theme::RADIUS_SM));
-
-                    if style_ui.add_sized([56.0, 26.0], btn).clicked() {
-                        self.set_map_style(style);
+                // Double-click to instantly center & pin the location
+                if response.double_clicked() {
+                    if let Some(click_pos) = response.interact_pointer_pos() {
+                        let is_on_controls = zoom_in_rect.contains(click_pos)
+                            || zoom_out_rect.contains(click_pos)
+                            || style_rect.contains(click_pos);
+                        if !is_on_controls {
+                            let projector = walkers::Projector::new(response.rect, &self.map_memory, self.pos);
+                            let geo_pos = projector.unproject(click_pos.to_vec2());
+                            self.jump_to(geo_pos.y(), geo_pos.x());
+                            self.status_message = format!("Pinned at {:.6}°, {:.6}° (Click 'Simulate Location' to inject)", geo_pos.y(), geo_pos.x());
+                        }
+                    }
+                }
+                // Right-click (secondary click) to quick-pin AND simulate immediately
+                if response.secondary_clicked() {
+                    if let Some(click_pos) = response.interact_pointer_pos() {
+                        let is_on_controls = zoom_in_rect.contains(click_pos)
+                            || zoom_out_rect.contains(click_pos)
+                            || style_rect.contains(click_pos);
+                        if !is_on_controls {
+                            let projector = walkers::Projector::new(response.rect, &self.map_memory, self.pos);
+                            let geo_pos = projector.unproject(click_pos.to_vec2());
+                            self.jump_to(geo_pos.y(), geo_pos.x());
+                            self.daemon.set_location(self.selected_udid.as_deref(), geo_pos.y(), geo_pos.x());
+                            self.status_message = format!("Simulating at {:.6}°, {:.6}°", geo_pos.y(), geo_pos.x());
+                            self.status_is_error = false;
+                        }
                     }
                 }
 
