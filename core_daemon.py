@@ -92,6 +92,9 @@ class CoreDaemon:
         )
 
         # Tunnel manager signals
+        self.tunnel_manager.tunnel_starting.connect(
+            lambda: emit_event("tunnel_status", {"status": "starting", "running": False})
+        )
         self.tunnel_manager.tunnel_started.connect(
             lambda: emit_event("tunnel_status", {"status": "started", "running": True})
         )
@@ -178,13 +181,15 @@ class CoreDaemon:
             return {"success": True, "message": "Clear requested"}
 
         elif method == "start_tunnel":
-            self.tunnel_manager.start_tunnel()
+            emit_event("tunnel_status", {"status": "starting", "running": False})
+            threading.Thread(target=self.tunnel_manager.start_tunnel, daemon=True).start()
             return {"success": True}
 
         elif method == "submit_tunnel_password":
             pwd = params.get("password", "")
             remember = params.get("remember", True)
-            self.tunnel_manager.provide_password(pwd, remember=remember)
+            emit_event("tunnel_status", {"status": "starting", "running": False})
+            threading.Thread(target=lambda: self.tunnel_manager.provide_password(pwd, remember=remember), daemon=True).start()
             return {"success": True}
 
         elif method == "cancel_tunnel_password":

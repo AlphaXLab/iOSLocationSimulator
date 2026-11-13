@@ -124,6 +124,7 @@ pub struct LocationSimulatorApp {
     saved_locations: Vec<SavedLocation>,
     gpx_routes: Vec<GPXRoute>,
     tunnel_status: TunnelStatus,
+    is_tunnel_starting: bool,
 
     // Navigation & Layout
     active_tab: SidebarTab,
@@ -239,6 +240,7 @@ impl LocationSimulatorApp {
                 running: false,
                 error: None,
             },
+            is_tunnel_starting: false,
             active_tab: SidebarTab::Locations,
             search_query: String::new(),
             last_searched_query: String::new(),
@@ -367,19 +369,27 @@ impl LocationSimulatorApp {
                         self.show_password_modal = true;
                         self.status_message = "Admin password required for iOS 17+ tunnel".to_string();
                         self.status_is_error = false;
+                        self.is_tunnel_starting = false;
                     } else if status.running {
                         self.status_message = "RemoteXPC tunnel active".to_string();
                         self.status_is_error = false;
                         self.show_password_modal = false;
+                        self.is_tunnel_starting = false;
                     } else if let Some(err) = &status.error {
                         if err.contains("password") || err.contains("Authentication") || err.contains("sudo") {
                             self.show_password_modal = true;
                         }
                         self.status_message = format!("Tunnel: {err}");
                         self.status_is_error = true;
+                        self.is_tunnel_starting = false;
                     } else if status.status.as_deref() == Some("stopped") {
                         self.status_message = "RemoteXPC tunnel stopped".to_string();
                         self.status_is_error = false;
+                        self.is_tunnel_starting = false;
+                    } else if status.status.as_deref() == Some("starting") {
+                        self.status_message = "Starting RemoteXPC tunnel daemon...".to_string();
+                        self.status_is_error = false;
+                        self.is_tunnel_starting = true;
                     }
                     self.tunnel_status = status;
                 }
@@ -427,6 +437,9 @@ fn truncate_chars(s: &str, max_chars: usize) -> String {
 impl eframe::App for LocationSimulatorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_background_events();
+        if self.is_tunnel_starting {
+            ctx.request_repaint();
+        }
         let pal = theme::palette(true);
 
         // =========================================================================
@@ -442,18 +455,29 @@ impl eframe::App for LocationSimulatorApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
-                    // Status glowing dot
-                    let dot_color = if self.status_is_error {
-                        pal.danger
-                    } else if self.status_message.starts_with("Setting") || self.status_message.starts_with("Starting") {
-                        pal.accent
-                    } else {
-                        pal.ok
-                    };
+                    let is_starting = self.is_tunnel_starting || self.tunnel_status.status.as_deref() == Some("starting");
 
-                    let dot_center = ui.cursor().min + Vec2::new(6.0, 18.0);
-                    ui.painter().circle_filled(dot_center, 4.5_f32, dot_color);
-                    ui.add_space(20.0);
+                    // Status glowing dot or spinning progress
+                    if is_starting {
+                        let spinner_rect = Rect::from_center_size(
+                            ui.cursor().min + Vec2::new(8.0, 18.0),
+                            Vec2::new(16.0, 16.0),
+                        );
+                        ui.put(spinner_rect, egui::Spinner::new().size(13.0).color(pal.accent));
+                        ui.add_space(22.0);
+                    } else {
+                        let dot_color = if self.status_is_error {
+                            pal.danger
+                        } else if self.status_message.starts_with("Setting") || self.status_message.starts_with("Starting") {
+                            pal.accent
+                        } else {
+                            pal.ok
+                        };
+
+                        let dot_center = ui.cursor().min + Vec2::new(6.0, 18.0);
+                        ui.painter().circle_filled(dot_center, 4.5_f32, dot_color);
+                        ui.add_space(20.0);
+                    }
 
                     // Status Message + Realtime Map Coordinates
                     let (cur_lat, cur_lon) = self.current_center_coordinates();
@@ -666,33 +690,39 @@ impl eframe::App for LocationSimulatorApp {
 
                 // --- TUNNEL STATUS BAR (iOS 17+) ---
                 let tunnel_running = self.tunnel_status.running;
-                let tunnel_rect = ui
+                let is_auth_needed = !tunnel_running && self.tunnel_status.status.as_deref() == Some("password_required");
+                let is_starting = !tunnel_running && (self.is_tunnel_starting || self.tunnel_status.status.as_deref() == Some("starting"));
+
+                let (tunnel_box, mut tunnel_resp) = ui
                     .allocate_exact_size(egui::vec2(ui.available_width(), 32.0), egui::Sense::click());
 
-                let tunnel_bg = if tunnel_rect.1.hovered() { pal.hover } else { pal.chrome };
-                ui.painter().rect_filled(tunnel_rect.0, CornerRadius::same(theme::RADIUS_SM), tunnel_bg);
+                if is_starting {
+                    tunnel_resp = tunnel_resp.on_hover_cursor(egui::CursorIcon::Wait);
+                }
+
+                let tunnel_bg = if tunnel_resp.hovered() && !is_starting { pal.hover } else { pal.chrome };
+                ui.painter().rect_filled(tunnel_box, CornerRadius::same(theme::RADIUS_SM), tunnel_bg);
                 ui.painter().rect_stroke(
-                    tunnel_rect.0,
+                    tunnel_box,
                     CornerRadius::same(theme::RADIUS_SM),
-                    Stroke::new(1.0_f32, if tunnel_running { pal.accent } else { pal.separator }),
+                    Stroke::new(1.0_f32, if tunnel_running { pal.accent } else if is_starting { pal.accent } else { pal.separator }),
                     StrokeKind::Inside,
                 );
 
                 let tunnel_icon_rect = Rect::from_center_size(
-                    tunnel_rect.0.left_center() + Vec2::new(18.0, 0.0),
+                    tunnel_box.left_center() + Vec2::new(18.0, 0.0),
                     Vec2::new(14.0, 14.0),
                 );
                 icons::paint(
                     ui.painter(),
                     tunnel_icon_rect,
                     if tunnel_running { Icon::Lock } else { Icon::Unlock },
-                    if tunnel_running { pal.ok } else { pal.text_muted },
+                    if tunnel_running { pal.ok } else if is_starting { pal.accent } else { pal.text_muted },
                 );
 
-                let is_auth_needed = self.tunnel_status.status.as_deref() == Some("password_required");
                 let status_color = if tunnel_running {
                     pal.ok
-                } else if is_auth_needed {
+                } else if is_starting || is_auth_needed {
                     pal.accent
                 } else {
                     pal.text_muted
@@ -700,45 +730,57 @@ impl eframe::App for LocationSimulatorApp {
 
                 let status_label = if tunnel_running {
                     "RemoteXPC Tunnel: Active"
+                } else if is_starting {
+                    "RemoteXPC Tunnel: Starting..."
                 } else if is_auth_needed {
                     "RemoteXPC Tunnel: Auth Needed"
                 } else {
                     "RemoteXPC Tunnel: Inactive"
                 };
 
-                let action_label = if tunnel_running {
-                    "Stop"
-                } else if is_auth_needed {
-                    "Auth"
-                } else {
-                    "Start"
-                };
-
                 ui.painter().text(
-                    tunnel_rect.0.left_center() + Vec2::new(36.0, 0.0),
+                    tunnel_box.left_center() + Vec2::new(36.0, 0.0),
                     Align2::LEFT_CENTER,
                     status_label,
                     theme::ui(11.5),
                     status_color,
                 );
 
-                // Start/Stop action text on right
-                ui.painter().text(
-                    tunnel_rect.0.right_center() - Vec2::new(12.0, 0.0),
-                    Align2::RIGHT_CENTER,
-                    action_label,
-                    theme::semi(11.0),
-                    if tunnel_running { pal.danger } else { pal.accent },
-                );
+                // Right side: Start/Stop/Auth or Spinner
+                if is_starting {
+                    let spinner_rect = Rect::from_center_size(
+                        tunnel_box.right_center() - Vec2::new(16.0, 0.0),
+                        Vec2::new(14.0, 14.0),
+                    );
+                    ui.put(spinner_rect, egui::Spinner::new().size(13.0).color(pal.accent));
+                } else {
+                    let action_label = if tunnel_running {
+                        "Stop"
+                    } else if is_auth_needed {
+                        "Auth"
+                    } else {
+                        "Start"
+                    };
 
-                if tunnel_rect.1.clicked() {
+                    ui.painter().text(
+                        tunnel_box.right_center() - Vec2::new(12.0, 0.0),
+                        Align2::RIGHT_CENTER,
+                        action_label,
+                        theme::semi(11.0),
+                        if tunnel_running { pal.danger } else { pal.accent },
+                    );
+                }
+
+                if tunnel_resp.clicked() && !is_starting {
                     if tunnel_running {
                         self.daemon.stop_tunnel();
                     } else if is_auth_needed {
                         self.show_password_modal = true;
                     } else {
+                        self.is_tunnel_starting = true;
                         self.daemon.start_tunnel();
                         self.status_message = "Starting RemoteXPC tunnel daemon...".to_string();
+                        self.status_is_error = false;
                     }
                 }
 
@@ -1369,12 +1411,15 @@ impl eframe::App for LocationSimulatorApp {
                     ui.add_space(14.0);
                     ui.horizontal(|ui| {
                         if ui.add_sized([140.0, 36.0], egui::Button::new(egui::RichText::new("Authenticate").font(theme::semi(13.0))).fill(pal.accent)).clicked() {
+                            self.is_tunnel_starting = true;
                             self.daemon.submit_tunnel_password(&self.password_input, self.remember_password);
                             self.password_input.clear();
                             self.show_password_modal = false;
-                            self.status_message = "Authenticating tunnel...".to_string();
+                            self.status_message = "Starting RemoteXPC tunnel daemon... (authenticating)".to_string();
+                            self.status_is_error = false;
                         }
                         if ui.add_sized([100.0, 36.0], egui::Button::new(egui::RichText::new("Cancel").font(theme::ui(12.5)))).clicked() {
+                            self.is_tunnel_starting = false;
                             self.daemon.cancel_tunnel_password();
                             self.password_input.clear();
                             self.show_password_modal = false;

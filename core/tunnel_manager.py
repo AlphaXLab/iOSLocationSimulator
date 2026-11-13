@@ -88,6 +88,7 @@ class TunnelManager(QObject):
     """Manages the RemoteXPC tunnel process for iOS 17+ devices"""
 
     # Signals
+    tunnel_starting = pyqtSignal()
     tunnel_started = pyqtSignal()
     tunnel_stopped = pyqtSignal()
     tunnel_error = pyqtSignal(str)
@@ -116,6 +117,7 @@ class TunnelManager(QObject):
             return
 
         self._is_starting = True
+        self.tunnel_starting.emit()
 
         try:
             logger.info("Starting RemoteXPC tunnel...")
@@ -233,6 +235,7 @@ class TunnelManager(QObject):
     def provide_password(self, password: str, remember: bool = True):
         """Called by GUI when user provides password"""
         self._is_starting = True
+        self.tunnel_starting.emit()
         success = self._start_tunnel_with_password(password)
         if success and remember:
             _save_keychain_password(password)
