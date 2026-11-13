@@ -24,25 +24,29 @@ pub enum MapStyle {
 }
 
 // ---------------------------------------------------------------------------
-// 100% Free Tile Sources - ZERO API KEY REQUIRED
+// Tile Sources
 // ---------------------------------------------------------------------------
 
-/// ArcGIS World Dark Gray Base (Clean dark map matching TableX #1E1E1E canvas, no API key)
-#[derive(Clone, Copy, Default)]
-pub struct ArcGISDark;
+const CARTO_API_KEY: &str = "cb1_5809_1_802d6217ff1f677f9514472e";
 
-impl walkers::sources::TileSource for ArcGISDark {
+/// CartoDB Dark Matter with authenticated API key (clean, watermark-free dark theme)
+#[derive(Clone, Copy, Default)]
+pub struct CartoDark;
+
+impl walkers::sources::TileSource for CartoDark {
     fn tile_url(&self, tile_id: TileId) -> String {
+        let servers = ['a', 'b', 'c', 'd'];
+        let s = servers[(tile_id.x + tile_id.y) as usize % servers.len()];
         format!(
-            "https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{}/{}/{}",
-            tile_id.zoom, tile_id.y, tile_id.x
+            "https://{}.basemaps.cartocdn.com/dark_all/{}/{}/{}.png?key={}",
+            s, tile_id.zoom, tile_id.x, tile_id.y, CARTO_API_KEY
         )
     }
 
     fn attribution(&self) -> walkers::sources::Attribution {
         walkers::sources::Attribution {
-            text: "© Esri, HERE, Garmin, OpenStreetMap",
-            url: "https://www.esri.com",
+            text: "© OpenStreetMap contributors © CARTO",
+            url: "https://carto.com/attributions",
             logo_light: None,
             logo_dark: None,
         }
@@ -152,8 +156,8 @@ impl LocationSimulatorApp {
             cache: dirs_cache_dir(),
             ..Default::default()
         };
-        // Default to ArcGIS Dark Map (100% free dark basemap, zero API key required)
-        let tiles = HttpTiles::with_options(ArcGISDark, http_options, cc.egui_ctx.to_owned());
+        // Default to CartoDB Dark Matter with authenticated API key
+        let tiles = HttpTiles::with_options(CartoDark, http_options, cc.egui_ctx.to_owned());
 
         let initial_lat = 37.7749;
         let initial_lon = -122.4194;
@@ -208,7 +212,7 @@ impl LocationSimulatorApp {
         };
         self.tiles = match style {
             MapStyle::Dark => {
-                HttpTiles::with_options(ArcGISDark, http_options, self.egui_ctx.clone())
+                HttpTiles::with_options(CartoDark, http_options, self.egui_ctx.clone())
             }
             MapStyle::Osm => {
                 HttpTiles::with_options(OpenStreetMapSource, http_options, self.egui_ctx.clone())
