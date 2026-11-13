@@ -333,6 +333,16 @@ fn dirs_cache_dir() -> Option<std::path::PathBuf> {
     }
 }
 
+fn truncate_chars(s: &str, max_chars: usize) -> String {
+    let mut chars = s.chars();
+    let truncated: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{truncated}...")
+    } else {
+        truncated
+    }
+}
+
 impl eframe::App for LocationSimulatorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_background_events();
@@ -1127,11 +1137,7 @@ impl eframe::App for LocationSimulatorApp {
                         let item_icon_rect = Rect::from_center_size(row_rect.left_center() + Vec2::new(16.0, 0.0), Vec2::new(14.0, 14.0));
                         icons::paint(dropdown_ui.painter(), item_icon_rect, Icon::Search, pal.accent);
 
-                        let text = if item.display_name.len() > 55 {
-                            format!("{}...", &item.display_name[..55])
-                        } else {
-                            item.display_name.clone()
-                        };
+                        let text = truncate_chars(&item.display_name, 50);
                         dropdown_ui.painter().text(
                             row_rect.left_center() + Vec2::new(34.0, 0.0),
                             Align2::LEFT_CENTER,
