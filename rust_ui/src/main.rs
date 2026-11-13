@@ -9,11 +9,20 @@ pub mod widgets;
 
 use app::LocationSimulatorApp;
 
+fn load_app_icon() -> Option<eframe::egui::IconData> {
+    const ICON_BYTES: &[u8] = include_bytes!("../assets/icon_512.png");
+    eframe::icon_data::from_png_bytes(ICON_BYTES).ok()
+}
+
 fn main() -> eframe::Result<()> {
     let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_title("Location Simulator")
         .with_inner_size([1180.0, 780.0])
         .with_min_inner_size([960.0, 620.0]);
+
+    if let Some(icon) = load_app_icon() {
+        viewport = viewport.with_icon(icon);
+    }
 
     #[cfg(target_os = "macos")]
     {
