@@ -1,4 +1,5 @@
 mod app;
+pub mod config;
 mod daemon;
 mod geocoding;
 pub mod icons;

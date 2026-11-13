@@ -10,23 +10,70 @@ struct NominatimItem {
     lon: String,
 }
 
+#[derive(Deserialize)]
+struct GoogleGeocodeResponse {
+    results: Option<Vec<GoogleGeocodeResult>>,
+    status: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GoogleGeocodeResult {
+    formatted_address: String,
+    geometry: GoogleGeometry,
+}
+
+#[derive(Deserialize)]
+struct GoogleGeometry {
+    location: GoogleLocation,
+}
+
+#[derive(Deserialize)]
+struct GoogleLocation {
+    lat: f64,
+    lng: f64,
+}
+
+#[derive(Deserialize)]
+struct PhotonResponse {
+    features: Option<Vec<PhotonFeature>>,
+}
+
+#[derive(Deserialize)]
+struct PhotonFeature {
+    geometry: PhotonGeometry,
+    properties: PhotonProperties,
+}
+
+#[derive(Deserialize)]
+struct PhotonGeometry {
+    coordinates: Vec<f64>,
+}
+
+#[derive(Deserialize)]
+struct PhotonProperties {
+    name: Option<String>,
+    city: Option<String>,
+    state: Option<String>,
+    country: Option<String>,
+}
+
 pub struct GeocodingClient {
-    tx: Sender<String>,
+    tx: Sender<(String, String)>,
     rx: Receiver<Vec<SearchSuggestion>>,
 }
 
 impl GeocodingClient {
     pub fn new() -> Self {
-        let (tx, task_rx) = channel::<String>();
+        let (tx, task_rx) = channel::<(String, String)>();
         let (result_tx, rx) = channel::<Vec<SearchSuggestion>>();
 
         thread::spawn(move || {
             let client = reqwest::blocking::Client::builder()
-                .user_agent("LocationSimulator-Rust/1.0 (contact: github)")
+                .user_agent("LocationSimulator/2.0 (iOS Location Simulation; contact: github)")
                 .build()
                 .ok();
 
-            while let Ok(query) = task_rx.recv() {
+            while let Ok((query, api_key)) = task_rx.recv() {
                 let trimmed = query.trim().to_string();
                 if trimmed.is_empty() {
                     let _ = result_tx.send(Vec::new());
@@ -43,16 +90,96 @@ impl GeocodingClient {
                     continue;
                 }
 
-                if let Some(ref client) = client {
-                    let url = format!(
-                        "https://nominatim.openstreetmap.org/search?q={}&format=json&limit=5",
-                        urlencoding::encode(&trimmed)
-                    );
+                let mut suggestions = Vec::new();
 
-                    let suggestions = match client.get(&url).send() {
-                        Ok(resp) => {
+                if let Some(ref client) = client {
+                    // 1. Try Google Maps Geocoding API if key provided
+                    if !api_key.is_empty() {
+                        let g_url = format!(
+                            "https://maps.googleapis.com/maps/api/geocode/json?address={}&key={}",
+                            urlencoding::encode(&trimmed),
+                            api_key
+                        );
+                        if let Ok(resp) = client.get(&g_url).send() {
+                            if let Ok(g_data) = resp.json::<GoogleGeocodeResponse>() {
+                                if g_data.status.as_deref() == Some("OK") {
+                                    if let Some(results) = g_data.results {
+                                        suggestions = results
+                                            .into_iter()
+                                            .take(5)
+                                            .map(|r| SearchSuggestion {
+                                                display_name: r.formatted_address,
+                                                lat: r.geometry.location.lat,
+                                                lon: r.geometry.location.lng,
+                                            })
+                                            .collect();
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. If no Google results, use Photon (OpenStreetMap UTF-8 autocomplete)
+                    if suggestions.is_empty() {
+                        let photon_url = format!(
+                            "https://photon.komoot.io/api/?q={}&limit=5",
+                            urlencoding::encode(&trimmed)
+                        );
+                        if let Ok(resp) = client.get(&photon_url).send() {
+                            if let Ok(p_data) = resp.json::<PhotonResponse>() {
+                                if let Some(features) = p_data.features {
+                                    suggestions = features
+                                        .into_iter()
+                                        .filter_map(|f| {
+                                            if f.geometry.coordinates.len() >= 2 {
+                                                let lon = f.geometry.coordinates[0];
+                                                let lat = f.geometry.coordinates[1];
+                                                let mut labels = Vec::new();
+                                                if let Some(n) = f.properties.name {
+                                                    labels.push(n);
+                                                }
+                                                if let Some(c) = f.properties.city {
+                                                    if !labels.contains(&c) {
+                                                        labels.push(c);
+                                                    }
+                                                }
+                                                if let Some(s) = f.properties.state {
+                                                    if !labels.contains(&s) {
+                                                        labels.push(s);
+                                                    }
+                                                }
+                                                if let Some(co) = f.properties.country {
+                                                    labels.push(co);
+                                                }
+                                                let name = if labels.is_empty() {
+                                                    format!("{lat:.5}, {lon:.5}")
+                                                } else {
+                                                    labels.join(", ")
+                                                };
+                                                Some(SearchSuggestion {
+                                                    display_name: name,
+                                                    lat,
+                                                    lon,
+                                                })
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect();
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Fallback to Nominatim if still empty
+                    if suggestions.is_empty() {
+                        let nom_url = format!(
+                            "https://nominatim.openstreetmap.org/search?q={}&format=json&limit=5",
+                            urlencoding::encode(&trimmed)
+                        );
+                        if let Ok(resp) = client.get(&nom_url).send() {
                             if let Ok(items) = resp.json::<Vec<NominatimItem>>() {
-                                items
+                                suggestions = items
                                     .into_iter()
                                     .filter_map(|item| {
                                         let lat = item.lat.parse::<f64>().ok()?;
@@ -63,26 +190,21 @@ impl GeocodingClient {
                                             lon,
                                         })
                                     })
-                                    .collect()
-                            } else {
-                                Vec::new()
+                                    .collect();
                             }
                         }
-                        Err(_) => Vec::new(),
-                    };
-
-                    let _ = result_tx.send(suggestions);
-                } else {
-                    let _ = result_tx.send(Vec::new());
+                    }
                 }
+
+                let _ = result_tx.send(suggestions);
             }
         });
 
         Self { tx, rx }
     }
 
-    pub fn search(&self, query: String) {
-        let _ = self.tx.send(query);
+    pub fn search(&self, query: String, api_key: String) {
+        let _ = self.tx.send((query, api_key));
     }
 
     pub fn poll_results(&self) -> Option<Vec<SearchSuggestion>> {

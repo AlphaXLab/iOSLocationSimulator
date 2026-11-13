@@ -143,21 +143,68 @@ pub fn install_fonts(ctx: &egui::Context) {
             "../assets/fonts/JetBrainsMono-Regular.ttf"
         ))),
     );
+    fonts.font_data.insert(
+        "NotoSansMyanmar".to_owned(),
+        Arc::new(FontData::from_static(include_bytes!(
+            "../assets/fonts/NotoSansMyanmar.ttc"
+        ))),
+    );
 
-    fonts
+    // Dynamic system fallback fonts for CJK, Arabic, Thai, Devanagari, and full Unicode
+    let fallback_paths = [
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+        "/System/Library/Fonts/Supplemental/Thonburi.ttc",
+        "/System/Library/Fonts/NotoNastaliq.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "C:\\Windows\\Fonts\\arialuni.ttf",
+        "C:\\Windows\\Fonts\\msyh.ttc",
+        "C:\\Windows\\Fonts\\seguiemj.ttf",
+    ];
+
+    let mut sys_fallbacks = vec!["NotoSansMyanmar".to_owned()];
+    for (idx, path) in fallback_paths.iter().enumerate() {
+        if let Ok(bytes) = std::fs::read(path) {
+            let name = format!("SysUnicode_{idx}");
+            fonts
+                .font_data
+                .insert(name.clone(), Arc::new(FontData::from_owned(bytes)));
+            sys_fallbacks.push(name);
+        }
+    }
+
+    // Proportional font family
+    let prop = fonts
         .families
         .get_mut(&FontFamily::Proportional)
-        .unwrap()
-        .insert(0, "Inter".to_owned());
-    fonts
+        .unwrap();
+    prop.insert(0, "Inter".to_owned());
+    prop.extend(sys_fallbacks.iter().cloned());
+
+    // Monospace font family
+    let mono = fonts
         .families
         .get_mut(&FontFamily::Monospace)
-        .unwrap()
-        .insert(0, "JetBrainsMono".to_owned());
+        .unwrap();
+    mono.insert(0, "JetBrainsMono".to_owned());
+    mono.extend(sys_fallbacks.iter().cloned());
+
+    // InterSemi family (with full fallbacks)
+    let mut semi_chain = vec![
+        "InterSemi".to_owned(),
+        "Inter".to_owned(),
+        "Ubuntu-Light".to_owned(),
+        "NotoEmoji-Regular".to_owned(),
+    ];
+    semi_chain.extend(sys_fallbacks.iter().cloned());
     fonts.families.insert(
         FontFamily::Name("InterSemi".into()),
-        vec!["InterSemi".to_owned(), "Inter".to_owned()],
+        semi_chain,
     );
+
     ctx.set_fonts(fonts);
 }
 

@@ -1,3 +1,4 @@
+use crate::config::AppConfig;
 use crate::daemon::{DaemonClient, DaemonEvent};
 use crate::geocoding::{parse_coordinates, GeocodingClient};
 use crate::icons::{self, Icon};
@@ -18,41 +19,51 @@ enum SidebarTab {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum MapStyle {
-    Street,
-    Dark,
+    Google,
+    Hybrid,
     Osm,
-    Satellite,
+    Dark,
 }
 
 // ---------------------------------------------------------------------------
 // Tile Sources
 // ---------------------------------------------------------------------------
 
-const CARTO_API_KEY: &str = "cb1_5809_1_802d6217ff1f677f9514472e";
+/// Google Maps Tile Source (Roadmap "m", Satellite Hybrid "y", Terrain "p")
+#[derive(Clone, Default)]
+pub struct GoogleMapsSource {
+    pub api_key: String,
+    pub layer: &'static str,
+}
 
-/// CartoDB Voyager: crisp, modern, high-contrast street map with clear labels & landmarks
-#[derive(Clone, Copy, Default)]
-pub struct CartoVoyager;
-
-impl walkers::sources::TileSource for CartoVoyager {
+impl walkers::sources::TileSource for GoogleMapsSource {
     fn tile_url(&self, tile_id: TileId) -> String {
-        let servers = ['a', 'b', 'c', 'd'];
+        let servers = ['0', '1', '2', '3'];
         let s = servers[(tile_id.x + tile_id.y) as usize % servers.len()];
-        format!(
-            "https://{}.basemaps.cartocdn.com/rastertiles/voyager/{}/{}/{}.png?key={}",
-            s, tile_id.zoom, tile_id.x, tile_id.y, CARTO_API_KEY
-        )
+        if self.api_key.is_empty() {
+            format!(
+                "https://mt{}.google.com/vt/lyrs={}&x={}&y={}&z={}",
+                s, self.layer, tile_id.x, tile_id.y, tile_id.zoom
+            )
+        } else {
+            format!(
+                "https://mt{}.google.com/vt/lyrs={}&x={}&y={}&z={}&key={}",
+                s, self.layer, tile_id.x, tile_id.y, tile_id.zoom, self.api_key
+            )
+        }
     }
 
     fn attribution(&self) -> walkers::sources::Attribution {
         walkers::sources::Attribution {
-            text: "© OpenStreetMap contributors © CARTO",
-            url: "https://carto.com/attributions",
+            text: "© Google Maps",
+            url: "https://maps.google.com",
             logo_light: None,
             logo_dark: None,
         }
     }
 }
+
+const CARTO_API_KEY: &str = "cb1_5809_1_802d6217ff1f677f9514472e";
 
 /// CartoDB Dark Matter with authenticated API key (ultra-dark night theme)
 #[derive(Clone, Copy, Default)]
@@ -100,28 +111,6 @@ impl walkers::sources::TileSource for OpenStreetMapSource {
     }
 }
 
-/// Esri World Imagery (High-res satellite map, zero API key required)
-#[derive(Clone, Copy, Default)]
-pub struct EsriSatellite;
-
-impl walkers::sources::TileSource for EsriSatellite {
-    fn tile_url(&self, tile_id: TileId) -> String {
-        format!(
-            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{}/{}/{}",
-            tile_id.zoom, tile_id.y, tile_id.x
-        )
-    }
-
-    fn attribution(&self) -> walkers::sources::Attribution {
-        walkers::sources::Attribution {
-            text: "© Esri, Maxar, Earthstar Geographics",
-            url: "https://www.esri.com",
-            logo_light: None,
-            logo_dark: None,
-        }
-    }
-}
-
 pub struct LocationSimulatorApp {
     daemon: DaemonClient,
     geocoding: GeocodingClient,
@@ -160,7 +149,10 @@ pub struct LocationSimulatorApp {
     route_speed: f64,
     route_loop: bool,
 
-    // Modals
+    // Modals & Config
+    config: AppConfig,
+    show_api_key_modal: bool,
+    api_key_input: String,
     show_password_modal: bool,
     password_input: String,
     show_save_modal: bool,
@@ -176,13 +168,23 @@ impl LocationSimulatorApp {
 
         let daemon = DaemonClient::spawn().expect("Failed to initialize Python daemon sidecar");
         let geocoding = GeocodingClient::new();
+        let config = AppConfig::load();
+        let show_api_key_modal = config.google_maps_api_key.trim().is_empty();
+        let api_key_input = config.google_maps_api_key.clone();
 
         let http_options = HttpOptions {
             cache: dirs_cache_dir(),
             ..Default::default()
         };
-        // Default to CartoDB Voyager: crisp, modern, high-contrast street map with clear labels & landmarks
-        let tiles = HttpTiles::with_options(CartoVoyager, http_options, cc.egui_ctx.to_owned());
+        // Default to Google Maps Roadmap
+        let tiles = HttpTiles::with_options(
+            GoogleMapsSource {
+                api_key: config.google_maps_api_key.clone(),
+                layer: "m",
+            },
+            http_options,
+            cc.egui_ctx.to_owned(),
+        );
 
         let initial_lat = 37.7749;
         let initial_lon = -122.4194;
@@ -194,8 +196,11 @@ impl LocationSimulatorApp {
             tiles,
             map_memory: MapMemory::default(),
             pos,
-            map_style: MapStyle::Street,
+            map_style: MapStyle::Google,
             egui_ctx: cc.egui_ctx.clone(),
+            config,
+            show_api_key_modal,
+            api_key_input,
             devices: Vec::new(),
             selected_udid: None,
             saved_locations: Vec::new(),
@@ -236,17 +241,31 @@ impl LocationSimulatorApp {
             ..Default::default()
         };
         self.tiles = match style {
-            MapStyle::Street => {
-                HttpTiles::with_options(CartoVoyager, http_options, self.egui_ctx.clone())
+            MapStyle::Google => {
+                HttpTiles::with_options(
+                    GoogleMapsSource {
+                        api_key: self.config.google_maps_api_key.clone(),
+                        layer: "m",
+                    },
+                    http_options,
+                    self.egui_ctx.clone(),
+                )
             }
-            MapStyle::Dark => {
-                HttpTiles::with_options(CartoDark, http_options, self.egui_ctx.clone())
+            MapStyle::Hybrid => {
+                HttpTiles::with_options(
+                    GoogleMapsSource {
+                        api_key: self.config.google_maps_api_key.clone(),
+                        layer: "y",
+                    },
+                    http_options,
+                    self.egui_ctx.clone(),
+                )
             }
             MapStyle::Osm => {
                 HttpTiles::with_options(OpenStreetMapSource, http_options, self.egui_ctx.clone())
             }
-            MapStyle::Satellite => {
-                HttpTiles::with_options(EsriSatellite, http_options, self.egui_ctx.clone())
+            MapStyle::Dark => {
+                HttpTiles::with_options(CartoDark, http_options, self.egui_ctx.clone())
             }
         };
     }
@@ -488,6 +507,12 @@ impl eframe::App for LocationSimulatorApp {
                         // About Dialog Button
                         if widgets::toolbar_icon(ui, Icon::More, "About Location Simulator", false).clicked() {
                             self.show_about_modal = true;
+                        }
+
+                        // Google Maps API Key Setup
+                        if widgets::toolbar_icon(ui, Icon::Sliders, "Google Maps API Key Setup", false).clicked() {
+                            self.api_key_input = self.config.google_maps_api_key.clone();
+                            self.show_api_key_modal = true;
                         }
 
                         // Import GPX Route
@@ -982,10 +1007,10 @@ impl eframe::App for LocationSimulatorApp {
                 }
 
                 // =========================================================================
-                // FLOATING MAP STYLE SWITCHER (Street / Dark / OSM / Sat) Top-Right
+                // FLOATING MAP STYLE SWITCHER (Google / Hybrid / OSM / Dark) Top-Right
                 // =========================================================================
-                let style_pos = Pos2::new(response.rect.right() - 216.0, response.rect.top() + 20.0);
-                let style_rect = Rect::from_min_size(style_pos, Vec2::new(196.0, 30.0));
+                let style_pos = Pos2::new(response.rect.right() - 250.0, response.rect.top() + 20.0);
+                let style_rect = Rect::from_min_size(style_pos, Vec2::new(236.0, 30.0));
 
                 painter.rect_filled(style_rect, CornerRadius::same(theme::RADIUS_SM), pal.elevated);
                 painter.rect_stroke(style_rect, CornerRadius::same(theme::RADIUS_SM), Stroke::new(1.0_f32, pal.separator), StrokeKind::Inside);
@@ -998,10 +1023,10 @@ impl eframe::App for LocationSimulatorApp {
                 style_ui.spacing_mut().item_spacing.x = 2.0;
 
                 let styles = [
-                    (MapStyle::Street, "Street"),
-                    (MapStyle::Dark, "Dark"),
+                    (MapStyle::Google, "Google"),
+                    (MapStyle::Hybrid, "Hybrid"),
                     (MapStyle::Osm, "OSM"),
-                    (MapStyle::Satellite, "Sat"),
+                    (MapStyle::Dark, "Dark"),
                 ];
                 for (style, label) in styles {
                     let is_active = self.map_style == style;
@@ -1013,7 +1038,7 @@ impl eframe::App for LocationSimulatorApp {
                     .fill(if is_active { pal.selection } else { Color32::TRANSPARENT })
                     .corner_radius(CornerRadius::same(theme::RADIUS_SM));
 
-                    if style_ui.add_sized([46.0, 26.0], btn).clicked() {
+                    if style_ui.add_sized([56.0, 26.0], btn).clicked() {
                         self.set_map_style(style);
                     }
                 }
@@ -1074,7 +1099,7 @@ impl eframe::App for LocationSimulatorApp {
                     let query = self.search_query.trim().to_string();
                     if query.len() >= 2 && query != self.last_searched_query {
                         self.last_searched_query = query.clone();
-                        self.geocoding.search(query);
+                        self.geocoding.search(query, self.config.google_maps_api_key.clone());
                     } else if query.is_empty() {
                         self.suggestions.clear();
                         self.show_suggestions = false;
@@ -1258,6 +1283,49 @@ impl eframe::App for LocationSimulatorApp {
                     if ui.button("Close").clicked() {
                         self.show_about_modal = false;
                     }
+                });
+        }
+
+        if self.show_api_key_modal {
+            egui::Window::new("Google Maps Platform Setup")
+                .collapsible(false)
+                .resizable(false)
+                .order(egui::Order::Foreground)
+                .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.set_min_width(430.0);
+                    ui.label(
+                        egui::RichText::new("Enter your Google Maps Platform API key to enable official Google Maps tiles and worldwide place search in all languages (including UTF-8 & Myanmar).")
+                            .font(theme::ui(12.5))
+                            .color(pal.text_muted),
+                    );
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Google Maps API Key:").font(theme::semi(12.0)).color(pal.text));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.api_key_input)
+                            .hint_text("AIzaSy...")
+                            .font(theme::mono(12.0))
+                            .desired_width(410.0),
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("Need a key? Visit console.cloud.google.com → APIs & Services")
+                            .font(theme::ui(10.5))
+                            .color(pal.text_faint),
+                    );
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if ui.add(egui::Button::new("Save & Enable Google Maps").fill(pal.accent)).clicked() {
+                            self.config.google_maps_api_key = self.api_key_input.trim().to_string();
+                            self.config.save();
+                            self.set_map_style(MapStyle::Google);
+                            self.status_message = "Google Maps enabled".to_string();
+                            self.show_api_key_modal = false;
+                        }
+                        if ui.button("Continue Without Key").clicked() {
+                            self.show_api_key_modal = false;
+                        }
+                    });
                 });
         }
     }
