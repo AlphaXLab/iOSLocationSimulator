@@ -75,12 +75,12 @@ pub fn search_field(
     let height = 28.0;
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), Sense::click());
 
-    // Paint background well
+    // Paint background well (TableX sharp rectangular)
     ui.painter()
-        .rect_filled(rect, CornerRadius::same(theme::RADIUS_MD), pal.input);
+        .rect_filled(rect, CornerRadius::ZERO, pal.input);
     ui.painter().rect_stroke(
         rect,
-        CornerRadius::same(theme::RADIUS_MD),
+        CornerRadius::ZERO,
         Stroke::new(1.0_f32, pal.separator),
         StrokeKind::Inside,
     );
@@ -106,7 +106,7 @@ pub fn search_field(
     if edit.has_focus() {
         ui.painter().rect_stroke(
             rect,
-            CornerRadius::same(theme::RADIUS_MD),
+            CornerRadius::ZERO,
             Stroke::new(1.0_f32, pal.accent),
             StrokeKind::Inside,
         );

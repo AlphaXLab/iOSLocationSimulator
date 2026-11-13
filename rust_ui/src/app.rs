@@ -1097,27 +1097,27 @@ impl eframe::App for LocationSimulatorApp {
                 let search_pos = Pos2::new(response.rect.left() + 20.0, response.rect.top() + 20.0);
                 let search_rect = Rect::from_min_size(search_pos, Vec2::new(search_w, search_h));
 
-                // Floating Google Maps Style Pill: Soft Elevation Drop Shadow
+                // Floating Search Bar: Sharp Rectangular (Zero Rounded Corners - TableX Style)
                 painter.rect_filled(
-                    search_rect.translate(Vec2::new(0.0, 3.0)),
-                    CornerRadius::same(24),
+                    search_rect.translate(Vec2::new(0.0, 2.0)),
+                    CornerRadius::ZERO,
                     Color32::from_black_alpha(65),
                 );
-                // Pill Body
+                // Search Body
                 painter.rect_filled(
                     search_rect,
-                    CornerRadius::same(24),
+                    CornerRadius::ZERO,
                     pal.elevated,
                 );
                 painter.rect_stroke(
                     search_rect,
-                    CornerRadius::same(24),
+                    CornerRadius::ZERO,
                     Stroke::new(1.0_f32, if self.search_query.is_empty() { pal.separator } else { pal.accent }),
                     StrokeKind::Inside,
                 );
 
-                // Search Icon on Left (vertically and horizontally centered in pill's left curve)
-                let search_icon_rect = Rect::from_center_size(search_rect.left_center() + Vec2::new(24.0, 0.0), Vec2::new(18.0, 18.0));
+                // Search Icon on Left
+                let search_icon_rect = Rect::from_center_size(search_rect.left_center() + Vec2::new(20.0, 0.0), Vec2::new(18.0, 18.0));
                 icons::paint(
                     &painter,
                     search_icon_rect,
@@ -1125,10 +1125,10 @@ impl eframe::App for LocationSimulatorApp {
                     if self.search_query.is_empty() { pal.text_muted } else { pal.accent },
                 );
 
-                // Text input placed inside the floating search bar (generous height & padding)
+                // Text input placed inside the floating search bar
                 let text_input_rect = Rect::from_min_max(
-                    search_rect.left_top() + Vec2::new(46.0, 4.0),
-                    search_rect.right_bottom() - Vec2::new(if self.search_query.is_empty() { 20.0 } else { 46.0 }, 4.0),
+                    search_rect.left_top() + Vec2::new(38.0, 4.0),
+                    search_rect.right_bottom() - Vec2::new(if self.search_query.is_empty() { 14.0 } else { 38.0 }, 4.0),
                 );
 
                 let mut text_ui = ui.new_child(
@@ -1172,7 +1172,7 @@ impl eframe::App for LocationSimulatorApp {
 
                 // Clear button ('X') when query is not empty
                 if !self.search_query.is_empty() {
-                    let clear_rect = Rect::from_center_size(search_rect.right_center() - Vec2::new(24.0, 0.0), Vec2::new(26.0, 26.0));
+                    let clear_rect = Rect::from_center_size(search_rect.right_center() - Vec2::new(20.0, 0.0), Vec2::new(24.0, 24.0));
                     let clear_icon_rect = Rect::from_center_size(clear_rect.center(), Vec2::new(14.0, 14.0));
                     icons::paint(&painter, clear_icon_rect, Icon::Close, pal.text_muted);
 
@@ -1188,9 +1188,9 @@ impl eframe::App for LocationSimulatorApp {
                     }
                 }
 
-                // Autocomplete Dropdown under Floating Search Bar
+                // Autocomplete Dropdown under Floating Search Bar (Zero Rounded Corners)
                 if self.show_suggestions && !self.suggestions.is_empty() {
-                    let dropdown_top = search_rect.bottom() + 8.0;
+                    let dropdown_top = search_rect.bottom() + 4.0;
                     let item_h = 40.0_f32;
                     let num_items = self.suggestions.len().min(5);
                     let dropdown_h = num_items as f32 * item_h + 8.0;
@@ -1198,12 +1198,12 @@ impl eframe::App for LocationSimulatorApp {
 
                     // Drop shadow for dropdown
                     painter.rect_filled(
-                        dropdown_rect.translate(Vec2::new(0.0, 4.0)),
-                        CornerRadius::same(theme::RADIUS_MD),
+                        dropdown_rect.translate(Vec2::new(0.0, 3.0)),
+                        CornerRadius::ZERO,
                         Color32::from_black_alpha(70),
                     );
-                    painter.rect_filled(dropdown_rect, CornerRadius::same(theme::RADIUS_MD), pal.elevated);
-                    painter.rect_stroke(dropdown_rect, CornerRadius::same(theme::RADIUS_MD), Stroke::new(1.0_f32, pal.separator), StrokeKind::Inside);
+                    painter.rect_filled(dropdown_rect, CornerRadius::ZERO, pal.elevated);
+                    painter.rect_stroke(dropdown_rect, CornerRadius::ZERO, Stroke::new(1.0_f32, pal.separator), StrokeKind::Inside);
 
                     let mut dropdown_ui = ui.new_child(
                         egui::UiBuilder::new()
@@ -1215,7 +1215,7 @@ impl eframe::App for LocationSimulatorApp {
                     for item in self.suggestions.iter().take(5) {
                         let (row_rect, row_resp) = dropdown_ui.allocate_exact_size(Vec2::new(dropdown_rect.width() - 8.0, item_h), egui::Sense::click());
                         if row_resp.hovered() {
-                            dropdown_ui.painter().rect_filled(row_rect, CornerRadius::same(theme::RADIUS_SM), pal.hover);
+                            dropdown_ui.painter().rect_filled(row_rect, CornerRadius::ZERO, pal.hover);
                         }
 
                         let item_icon_rect = Rect::from_center_size(row_rect.left_center() + Vec2::new(16.0, 0.0), Vec2::new(14.0, 14.0));
