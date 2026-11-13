@@ -10,6 +10,9 @@ import json
 import traceback
 import threading
 
+# Force pure-python signals and timers (no PyQt6 event loop required in daemon)
+os.environ["LOCATION_SIM_NO_QT"] = "1"
+
 # Ensure unbuffered output
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)

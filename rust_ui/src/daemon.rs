@@ -53,14 +53,15 @@ impl DaemonClient {
 
         // Find core_daemon.py in current dir, parent dir, or alongside executable
         let daemon_script = Self::find_daemon_script()?;
+        let python_bin = Self::find_python_bin(&daemon_script);
 
-        let mut child = Command::new("python3")
+        let mut child = Command::new(&python_bin)
             .arg(&daemon_script)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to spawn python3 {}: {e}", daemon_script.display()))?;
+            .map_err(|e| format!("Failed to spawn {} {}: {e}", python_bin.display(), daemon_script.display()))?;
 
         let mut stdin = child
             .stdin
@@ -146,6 +147,41 @@ impl DaemonClient {
         }
 
         Ok(PathBuf::from("core_daemon.py"))
+    }
+
+    fn find_python_bin(daemon_script: &std::path::Path) -> PathBuf {
+        // 1. Check active virtual environment
+        if let Ok(venv) = std::env::var("VIRTUAL_ENV") {
+            let p = PathBuf::from(venv).join("bin/python3");
+            if p.exists() {
+                return p;
+            }
+        }
+
+        // 2. Check relative to daemon_script parent
+        if let Some(parent) = daemon_script.parent() {
+            for sub in &["venv/bin/python3", ".venv/bin/python3", "venv/bin/python", ".venv/bin/python"] {
+                let p = parent.join(sub);
+                if p.exists() {
+                    return p;
+                }
+            }
+        }
+
+        // 3. Check current dir and parents
+        for sub in &[
+            "venv/bin/python3",
+            ".venv/bin/python3",
+            "../venv/bin/python3",
+            "../.venv/bin/python3",
+        ] {
+            let p = PathBuf::from(sub);
+            if p.exists() {
+                return p;
+            }
+        }
+
+        PathBuf::from("python3")
     }
 
     fn handle_event(event: &str, data: Value, tx: &Sender<DaemonEvent>) {

@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 
 try:
+    if os.environ.get("LOCATION_SIM_NO_QT") == "1":
+        raise ImportError("Forced pure-python daemon mode (no Qt event loop)")
     from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QStandardPaths
     from PyQt6.QtCore import QSettings
     HAS_PYQT6 = True
