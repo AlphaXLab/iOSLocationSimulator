@@ -15,6 +15,59 @@ from .qt_compat import QObject, pyqtSignal
 logger = logging.getLogger(__name__)
 
 
+def _get_keychain_password() -> Optional[str]:
+    """Retrieve saved tunnel password from macOS Keychain"""
+    if sys.platform != 'darwin':
+        return None
+    try:
+        res = subprocess.run(
+            ['/usr/bin/security', 'find-generic-password', '-s', 'LocationSimulator-Tunnel', '-w'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2
+        )
+        if res.returncode == 0:
+            pwd = res.stdout.strip()
+            if pwd:
+                return pwd
+    except Exception:
+        pass
+    return None
+
+
+def _save_keychain_password(password: str):
+    """Store tunnel password securely in macOS Keychain"""
+    if sys.platform != 'darwin' or not password:
+        return
+    import getpass
+    user = getpass.getuser()
+    try:
+        subprocess.run(
+            ['/usr/bin/security', 'add-generic-password', '-U', '-s', 'LocationSimulator-Tunnel', '-a', user, '-w', password],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False
+        )
+    except Exception as e:
+        logger.warning(f"Failed to save password to keychain: {e}")
+
+
+def _clear_keychain_password():
+    """Remove saved tunnel password from macOS Keychain"""
+    if sys.platform != 'darwin':
+        return
+    try:
+        subprocess.run(
+            ['/usr/bin/security', 'delete-generic-password', '-s', 'LocationSimulator-Tunnel'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False
+        )
+    except Exception:
+        pass
+
+
 def _get_python_executable():
     """
     Get the correct Python executable.
@@ -90,29 +143,36 @@ class TunnelManager(QObject):
             if self._process.poll() is None:
                 self._is_running = True
                 self._is_starting = False
-                logger.info("Tunnel started successfully")
+                logger.info("Tunnel started successfully (passwordless)")
                 self.tunnel_started.emit()
 
                 # Start monitor thread
                 self._monitor_thread = threading.Thread(target=self._monitor_tunnel, daemon=True)
                 self._monitor_thread.start()
-            else:
-                # Process died immediately - likely needs password
-                stderr = self._process.stderr.read() if self._process.stderr else ""
-                logger.warning(f"Tunnel process exited immediately: {stderr}")
+                return
 
-                # Request password from GUI
-                logger.info("Requesting password from user...")
-                self.password_required.emit()
-                # Note: _is_starting will remain True until password is provided or cancelled
+            # Check if a password is saved in macOS Keychain
+            saved_pwd = _get_keychain_password()
+            if saved_pwd:
+                logger.info("Found saved password in macOS Keychain, trying auto-authentication...")
+                if self._start_tunnel_with_password(saved_pwd):
+                    return
+                else:
+                    logger.warning("Saved Keychain password failed, clearing from Keychain...")
+                    _clear_keychain_password()
+
+            # Process died immediately and no valid saved password - request password from GUI
+            self._is_starting = False
+            logger.info("Requesting password from user...")
+            self.password_required.emit()
 
         except Exception as e:
             self._is_starting = False
             logger.error(f"Failed to start tunnel: {str(e)}")
             self.tunnel_error.emit(f"Failed to start tunnel: {str(e)}")
 
-    def _start_tunnel_with_password(self, password: str):
-        """Start tunnel with provided sudo password"""
+    def _start_tunnel_with_password(self, password: str) -> bool:
+        """Start tunnel with provided sudo password. Returns True on success, False on failure."""
         try:
             logger.info("Starting tunnel with password...")
 
@@ -151,6 +211,7 @@ class TunnelManager(QObject):
                 # Start monitor thread
                 self._monitor_thread = threading.Thread(target=self._monitor_tunnel, daemon=True)
                 self._monitor_thread.start()
+                return True
             else:
                 # Process died - likely wrong password or other error
                 stderr = self._process.stderr.read() if self._process.stderr else ""
@@ -161,19 +222,20 @@ class TunnelManager(QObject):
                     self.tunnel_error.emit("Incorrect password. Please try again.")
                 else:
                     self.tunnel_error.emit(f"Failed to start tunnel: {stderr}")
+                return False
 
         except Exception as e:
             self._is_starting = False
             logger.error(f"Failed to start tunnel with password: {str(e)}")
             self.tunnel_error.emit(f"Failed to start tunnel: {str(e)}")
+            return False
 
-    def provide_password(self, password: str):
+    def provide_password(self, password: str, remember: bool = True):
         """Called by GUI when user provides password"""
-        if not self._is_starting:
-            logger.warning("provide_password called but tunnel not starting")
-            return
-
-        self._start_tunnel_with_password(password)
+        self._is_starting = True
+        success = self._start_tunnel_with_password(password)
+        if success and remember:
+            _save_keychain_password(password)
 
     def cancel_password(self):
         """Called by GUI when user cancels password prompt"""

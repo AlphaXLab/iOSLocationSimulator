@@ -318,8 +318,11 @@ impl DaemonClient {
         self.send_command("start_tunnel", json!({}));
     }
 
-    pub fn submit_tunnel_password(&self, password: &str) {
-        self.send_command("submit_tunnel_password", json!({ "password": password }));
+    pub fn submit_tunnel_password(&self, password: &str, remember: bool) {
+        self.send_command(
+            "submit_tunnel_password",
+            json!({ "password": password, "remember": remember }),
+        );
     }
 
     pub fn cancel_tunnel_password(&self) {

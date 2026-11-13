@@ -183,7 +183,8 @@ class CoreDaemon:
 
         elif method == "submit_tunnel_password":
             pwd = params.get("password", "")
-            self.tunnel_manager.provide_password(pwd)
+            remember = params.get("remember", True)
+            self.tunnel_manager.provide_password(pwd, remember=remember)
             return {"success": True}
 
         elif method == "cancel_tunnel_password":

@@ -151,6 +151,7 @@ pub struct LocationSimulatorApp {
     api_key_input: String,
     show_password_modal: bool,
     password_input: String,
+    remember_password: bool,
     show_save_modal: bool,
     save_name_input: String,
     save_category_input: String,
@@ -220,6 +221,7 @@ impl LocationSimulatorApp {
             route_loop: false,
             show_password_modal: false,
             password_input: String::new(),
+            remember_password: true,
             show_save_modal: false,
             save_name_input: String::new(),
             save_category_input: "other".to_string(),
@@ -310,10 +312,23 @@ impl LocationSimulatorApp {
                     self.route_state = state;
                 }
                 DaemonEvent::TunnelStatus(status) => {
-                    if let Some(err) = &status.error {
+                    if status.status.as_deref() == Some("password_required") {
+                        self.show_password_modal = true;
+                        self.status_message = "Admin password required for iOS 17+ tunnel".to_string();
+                        self.status_is_error = false;
+                    } else if status.running {
+                        self.status_message = "RemoteXPC tunnel active".to_string();
+                        self.status_is_error = false;
+                        self.show_password_modal = false;
+                    } else if let Some(err) = &status.error {
                         if err.contains("password") || err.contains("Authentication") || err.contains("sudo") {
                             self.show_password_modal = true;
                         }
+                        self.status_message = format!("Tunnel: {err}");
+                        self.status_is_error = true;
+                    } else if status.status.as_deref() == Some("stopped") {
+                        self.status_message = "RemoteXPC tunnel stopped".to_string();
+                        self.status_is_error = false;
                     }
                     self.tunnel_status = status;
                 }
@@ -622,19 +637,44 @@ impl eframe::App for LocationSimulatorApp {
                     if tunnel_running { pal.ok } else { pal.text_muted },
                 );
 
+                let is_auth_needed = self.tunnel_status.status.as_deref() == Some("password_required");
+                let status_color = if tunnel_running {
+                    pal.ok
+                } else if is_auth_needed {
+                    pal.accent
+                } else {
+                    pal.text_muted
+                };
+
+                let status_label = if tunnel_running {
+                    "RemoteXPC Tunnel: Active"
+                } else if is_auth_needed {
+                    "RemoteXPC Tunnel: Auth Needed"
+                } else {
+                    "RemoteXPC Tunnel: Inactive"
+                };
+
+                let action_label = if tunnel_running {
+                    "Stop"
+                } else if is_auth_needed {
+                    "Auth"
+                } else {
+                    "Start"
+                };
+
                 ui.painter().text(
                     tunnel_rect.0.left_center() + Vec2::new(36.0, 0.0),
                     Align2::LEFT_CENTER,
-                    if tunnel_running { "RemoteXPC Tunnel: Active" } else { "RemoteXPC Tunnel: Inactive" },
+                    status_label,
                     theme::ui(11.5),
-                    if tunnel_running { pal.ok } else { pal.text_muted },
+                    status_color,
                 );
 
                 // Start/Stop action text on right
                 ui.painter().text(
                     tunnel_rect.0.right_center() - Vec2::new(12.0, 0.0),
                     Align2::RIGHT_CENTER,
-                    if tunnel_running { "Stop" } else { "Start" },
+                    action_label,
                     theme::semi(11.0),
                     if tunnel_running { pal.danger } else { pal.accent },
                 );
@@ -642,6 +682,8 @@ impl eframe::App for LocationSimulatorApp {
                 if tunnel_rect.1.clicked() {
                     if tunnel_running {
                         self.daemon.stop_tunnel();
+                    } else if is_auth_needed {
+                        self.show_password_modal = true;
                     } else {
                         self.daemon.start_tunnel();
                         self.status_message = "Starting RemoteXPC tunnel daemon...".to_string();
@@ -1264,12 +1306,21 @@ impl eframe::App for LocationSimulatorApp {
                     ui.label(egui::RichText::new("Password:").font(theme::semi(12.5)).color(pal.text));
                     ui.add(widgets::password_input(&mut self.password_input).desired_width(410.0));
 
+                    ui.add_space(8.0);
+                    ui.checkbox(
+                        &mut self.remember_password,
+                        egui::RichText::new("Save password in macOS Keychain (auto-connect next time)")
+                            .font(theme::ui(12.0))
+                            .color(pal.text),
+                    );
+
                     ui.add_space(14.0);
                     ui.horizontal(|ui| {
                         if ui.add_sized([140.0, 36.0], egui::Button::new(egui::RichText::new("Authenticate").font(theme::semi(13.0))).fill(pal.accent)).clicked() {
-                            self.daemon.submit_tunnel_password(&self.password_input);
+                            self.daemon.submit_tunnel_password(&self.password_input, self.remember_password);
                             self.password_input.clear();
                             self.show_password_modal = false;
+                            self.status_message = "Authenticating tunnel...".to_string();
                         }
                         if ui.add_sized([100.0, 36.0], egui::Button::new(egui::RichText::new("Cancel").font(theme::ui(12.5)))).clicked() {
                             self.daemon.cancel_tunnel_password();
