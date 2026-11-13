@@ -250,6 +250,7 @@ impl DaemonClient {
         let _ = self.cmd_tx.send(req.to_string());
     }
 
+    #[allow(dead_code)]
     pub fn select_device(&self, udid: &str) {
         self.send_command("select_device", json!({ "udid": udid }));
     }
@@ -328,14 +329,17 @@ impl DaemonClient {
         );
     }
 
+    #[allow(dead_code)]
     pub fn pause_route(&self) {
         self.send_command("pause_route", json!({}));
     }
 
+    #[allow(dead_code)]
     pub fn resume_route(&self) {
         self.send_command("resume_route", json!({}));
     }
 
+    #[allow(dead_code)]
     pub fn stop_route(&self) {
         self.send_command("stop_route", json!({}));
     }
