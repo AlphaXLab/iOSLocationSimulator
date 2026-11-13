@@ -1,11 +1,13 @@
 use crate::daemon::{DaemonClient, DaemonEvent};
 use crate::geocoding::{parse_coordinates, GeocodingClient};
+use crate::icons::{self, Icon};
 use crate::models::{GPXRoute, SavedLocation, SearchSuggestion, TunnelStatus, iOSDevice};
+use crate::theme;
+use crate::widgets;
 use eframe::egui::{
-    self, Align, Align2, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId,
-    Layout, Margin, Pos2, Rect, Stroke, StrokeKind, Vec2,
+    self, Align, Align2, Color32, CornerRadius, Layout, Margin, Pos2, Rect, Stroke,
+    StrokeKind, Vec2,
 };
-use std::sync::Arc;
 use walkers::{lat_lon, HttpOptions, HttpTiles, Map, MapMemory, Position, TileId};
 
 #[derive(PartialEq, Clone, Copy)]
@@ -14,70 +16,81 @@ enum SidebarTab {
     Routes,
 }
 
-// ---------------------------------------------------------------------------
-// CartoDB Dark Matter Tile Source (High-Performance Dark Map)
-// ---------------------------------------------------------------------------
-#[derive(Clone, Copy, Default)]
-pub struct CartoDark;
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MapStyle {
+    Dark,
+    Osm,
+    Satellite,
+}
 
-impl walkers::sources::TileSource for CartoDark {
+// ---------------------------------------------------------------------------
+// 100% Free Tile Sources - ZERO API KEY REQUIRED
+// ---------------------------------------------------------------------------
+
+/// ArcGIS World Dark Gray Base (Clean dark map matching TableX #1E1E1E canvas, no API key)
+#[derive(Clone, Copy, Default)]
+pub struct ArcGISDark;
+
+impl walkers::sources::TileSource for ArcGISDark {
     fn tile_url(&self, tile_id: TileId) -> String {
-        let servers = ['a', 'b', 'c', 'd'];
-        let s = servers[(tile_id.x + tile_id.y) as usize % servers.len()];
         format!(
-            "https://{}.basemaps.cartocdn.com/dark_all/{}/{}/{}.png",
-            s, tile_id.zoom, tile_id.x, tile_id.y
+            "https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{}/{}/{}",
+            tile_id.zoom, tile_id.y, tile_id.x
         )
     }
 
     fn attribution(&self) -> walkers::sources::Attribution {
         walkers::sources::Attribution {
-            text: "© OpenStreetMap contributors © CARTO",
-            url: "https://carto.com/attributions",
+            text: "© Esri, HERE, Garmin, OpenStreetMap",
+            url: "https://www.esri.com",
             logo_light: None,
             logo_dark: None,
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Professional macOS Dark Theme Tokens
-// ---------------------------------------------------------------------------
-#[allow(dead_code)]
-struct DarkTheme;
-#[allow(dead_code)]
-impl DarkTheme {
-    // Surfaces
-    pub const WINDOW_BG: Color32 = Color32::from_rgb(14, 16, 21);
-    pub const SIDEBAR_BG: Color32 = Color32::from_rgb(18, 21, 28);
-    pub const HEADER_BG: Color32 = Color32::from_rgb(18, 21, 28);
-    pub const BOTTOM_BG: Color32 = Color32::from_rgb(18, 21, 28);
-    pub const CARD_BG: Color32 = Color32::from_rgb(26, 30, 41);
-    pub const CARD_HOVER: Color32 = Color32::from_rgb(34, 40, 54);
-    pub const CARD_SELECTED: Color32 = Color32::from_rgb(22, 38, 64);
-    pub const INSET_BG: Color32 = Color32::from_rgb(11, 13, 18);
+/// OpenStreetMap Standard Tiles (100% free and open, zero API key required)
+#[derive(Clone, Copy, Default)]
+pub struct OpenStreetMapSource;
 
-    // Borders
-    pub const BORDER: Color32 = Color32::from_rgb(38, 44, 60);
-    pub const BORDER_LIGHT: Color32 = Color32::from_rgb(52, 60, 80);
-    pub const BORDER_ACTIVE: Color32 = Color32::from_rgb(0, 122, 255);
+impl walkers::sources::TileSource for OpenStreetMapSource {
+    fn tile_url(&self, tile_id: TileId) -> String {
+        format!(
+            "https://tile.openstreetmap.org/{}/{}/{}.png",
+            tile_id.zoom, tile_id.x, tile_id.y
+        )
+    }
 
-    // Typography
-    pub const TEXT_TITLE: Color32 = Color32::from_rgb(248, 250, 252);
-    pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(226, 232, 240);
-    pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(148, 163, 184);
-    pub const TEXT_MUTED: Color32 = Color32::from_rgb(100, 116, 139);
-    pub const TEXT_CYAN: Color32 = Color32::from_rgb(56, 189, 248);
+    fn attribution(&self) -> walkers::sources::Attribution {
+        walkers::sources::Attribution {
+            text: "© OpenStreetMap contributors",
+            url: "https://www.openstreetmap.org/copyright",
+            logo_light: None,
+            logo_dark: None,
+        }
+    }
+}
 
-    // Accents
-    pub const ACCENT_BLUE: Color32 = Color32::from_rgb(0, 122, 255);
-    pub const ACCENT_BLUE_HOVER: Color32 = Color32::from_rgb(30, 144, 255);
-    pub const ACCENT_CYAN: Color32 = Color32::from_rgb(56, 189, 248);
-    pub const ACCENT_GREEN: Color32 = Color32::from_rgb(34, 197, 94);
-    pub const ACCENT_GREEN_BG: Color32 = Color32::from_rgb(20, 48, 30);
-    pub const ACCENT_RED: Color32 = Color32::from_rgb(239, 68, 68);
-    pub const ACCENT_RED_BG: Color32 = Color32::from_rgb(48, 20, 24);
-    pub const ACCENT_AMBER: Color32 = Color32::from_rgb(245, 158, 11);
+/// Esri World Imagery (High-res satellite map, zero API key required)
+#[derive(Clone, Copy, Default)]
+pub struct EsriSatellite;
+
+impl walkers::sources::TileSource for EsriSatellite {
+    fn tile_url(&self, tile_id: TileId) -> String {
+        format!(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{}/{}/{}",
+            tile_id.zoom, tile_id.y, tile_id.x
+        )
+    }
+
+    fn attribution(&self) -> walkers::sources::Attribution {
+        walkers::sources::Attribution {
+            text: "© Esri, Maxar, Earthstar Geographics",
+            url: "https://www.esri.com",
+            logo_light: None,
+            logo_dark: None,
+        }
+    }
 }
 
 pub struct LocationSimulatorApp {
@@ -88,6 +101,8 @@ pub struct LocationSimulatorApp {
     tiles: HttpTiles,
     map_memory: MapMemory,
     pos: Position,
+    map_style: MapStyle,
+    egui_ctx: egui::Context,
 
     // App Data
     devices: Vec<iOSDevice>,
@@ -96,10 +111,10 @@ pub struct LocationSimulatorApp {
     gpx_routes: Vec<GPXRoute>,
     tunnel_status: TunnelStatus,
 
-    // Navigation
+    // Navigation & Layout
     active_tab: SidebarTab,
 
-    // Search
+    // Search (Google Maps style floating pill)
     search_query: String,
     last_searched_query: String,
     suggestions: Vec<SearchSuggestion>,
@@ -127,7 +142,8 @@ pub struct LocationSimulatorApp {
 
 impl LocationSimulatorApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        Self::apply_fonts_and_dark_theme(&cc.egui_ctx);
+        theme::install_fonts(&cc.egui_ctx);
+        theme::apply(&cc.egui_ctx, true);
 
         let daemon = DaemonClient::spawn().expect("Failed to initialize Python daemon sidecar");
         let geocoding = GeocodingClient::new();
@@ -136,12 +152,8 @@ impl LocationSimulatorApp {
             cache: dirs_cache_dir(),
             ..Default::default()
         };
-        // Use CartoDB Dark Matter tiles by default for dark theme
-        let tiles = HttpTiles::with_options(
-            CartoDark,
-            http_options,
-            cc.egui_ctx.to_owned(),
-        );
+        // Default to ArcGIS Dark Map (100% free dark basemap, zero API key required)
+        let tiles = HttpTiles::with_options(ArcGISDark, http_options, cc.egui_ctx.to_owned());
 
         let initial_lat = 37.7749;
         let initial_lon = -122.4194;
@@ -153,6 +165,8 @@ impl LocationSimulatorApp {
             tiles,
             map_memory: MapMemory::default(),
             pos,
+            map_style: MapStyle::Dark,
+            egui_ctx: cc.egui_ctx.clone(),
             devices: Vec::new(),
             selected_udid: None,
             saved_locations: Vec::new(),
@@ -183,74 +197,26 @@ impl LocationSimulatorApp {
         }
     }
 
-    fn apply_fonts_and_dark_theme(ctx: &egui::Context) {
-        // 1. Load System Fonts if available on macOS
-        let mut fonts = FontDefinitions::default();
-        if let Ok(sf_bytes) = std::fs::read("/System/Library/Fonts/SFCompact.ttf") {
-            fonts.font_data.insert(
-                "SFCompact".to_owned(),
-                Arc::new(FontData::from_owned(sf_bytes)),
-            );
-            if let Some(family) = fonts.families.get_mut(&FontFamily::Proportional) {
-                family.insert(0, "SFCompact".to_owned());
-            }
+    fn set_map_style(&mut self, style: MapStyle) {
+        if self.map_style == style {
+            return;
         }
-        if let Ok(mono_bytes) = std::fs::read("/System/Library/Fonts/Monaco.ttf") {
-            fonts.font_data.insert(
-                "Monaco".to_owned(),
-                Arc::new(FontData::from_owned(mono_bytes)),
-            );
-            if let Some(family) = fonts.families.get_mut(&FontFamily::Monospace) {
-                family.insert(0, "Monaco".to_owned());
+        self.map_style = style;
+        let http_options = HttpOptions {
+            cache: dirs_cache_dir(),
+            ..Default::default()
+        };
+        self.tiles = match style {
+            MapStyle::Dark => {
+                HttpTiles::with_options(ArcGISDark, http_options, self.egui_ctx.clone())
             }
-        }
-        ctx.set_fonts(fonts);
-
-        // 2. Configure Dark Visuals
-        let mut visuals = egui::Visuals::dark();
-
-        visuals.panel_fill = DarkTheme::SIDEBAR_BG;
-        visuals.window_fill = DarkTheme::CARD_BG;
-        visuals.extreme_bg_color = DarkTheme::INSET_BG;
-        visuals.faint_bg_color = DarkTheme::INSET_BG;
-
-        visuals.selection.bg_fill = Color32::from_rgb(18, 52, 94);
-        visuals.selection.stroke = Stroke::new(1.5_f32, DarkTheme::ACCENT_BLUE);
-
-        // Noninteractive widgets
-        visuals.widgets.noninteractive.bg_fill = DarkTheme::CARD_BG;
-        visuals.widgets.noninteractive.corner_radius = CornerRadius::same(6);
-        visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, DarkTheme::BORDER);
-        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, DarkTheme::TEXT_PRIMARY);
-
-        // Inactive widgets (buttons, inputs)
-        visuals.widgets.inactive.bg_fill = DarkTheme::CARD_BG;
-        visuals.widgets.inactive.corner_radius = CornerRadius::same(6);
-        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, DarkTheme::BORDER);
-        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, DarkTheme::TEXT_PRIMARY);
-
-        // Hovered widgets
-        visuals.widgets.hovered.bg_fill = DarkTheme::CARD_HOVER;
-        visuals.widgets.hovered.corner_radius = CornerRadius::same(6);
-        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, DarkTheme::BORDER_LIGHT);
-        visuals.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, DarkTheme::TEXT_TITLE);
-
-        // Active widgets
-        visuals.widgets.active.bg_fill = Color32::from_rgb(28, 64, 112);
-        visuals.widgets.active.corner_radius = CornerRadius::same(6);
-        visuals.widgets.active.bg_stroke = Stroke::new(1.5_f32, DarkTheme::ACCENT_BLUE);
-        visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, DarkTheme::TEXT_TITLE);
-
-        visuals.widgets.open.bg_fill = DarkTheme::CARD_BG;
-        visuals.widgets.open.corner_radius = CornerRadius::same(6);
-
-        ctx.set_visuals(visuals);
-
-        let mut style = (*ctx.style()).clone();
-        style.spacing.item_spacing = Vec2::new(8.0, 8.0);
-        style.spacing.button_padding = Vec2::new(12.0, 7.0);
-        style.spacing.window_margin = Margin::same(18);
-        ctx.set_style(style);
+            MapStyle::Osm => {
+                HttpTiles::with_options(OpenStreetMapSource, http_options, self.egui_ctx.clone())
+            }
+            MapStyle::Satellite => {
+                HttpTiles::with_options(EsriSatellite, http_options, self.egui_ctx.clone())
+            }
+        };
     }
 
     fn current_center_coordinates(&self) -> (f64, f64) {
@@ -271,7 +237,7 @@ impl LocationSimulatorApp {
                 DaemonEvent::Ready { locations, routes } => {
                     self.saved_locations = locations;
                     self.gpx_routes = routes;
-                    self.status_message = "Connected to iOS Core Daemon".to_string();
+                    self.status_message = "Connected to iOS Daemon".to_string();
                 }
                 DaemonEvent::DevicesUpdated {
                     devices,
@@ -296,30 +262,28 @@ impl LocationSimulatorApp {
                 DaemonEvent::RouteStateChanged { state } => {
                     self.route_state = state;
                 }
-                DaemonEvent::SavedLocationsUpdated(locs) => {
-                    self.saved_locations = locs;
+                DaemonEvent::TunnelStatus(status) => {
+                    if let Some(err) = &status.error {
+                        if err.contains("password") || err.contains("Authentication") || err.contains("sudo") {
+                            self.show_password_modal = true;
+                        }
+                    }
+                    self.tunnel_status = status;
+                }
+                DaemonEvent::SavedLocationsUpdated(locations) => {
+                    self.saved_locations = locations;
                 }
                 DaemonEvent::GpxRoutesUpdated(routes) => {
                     self.gpx_routes = routes;
                 }
-                DaemonEvent::TunnelStatus(status) => {
-                    // Only show password dialog if user requested tunnel or iOS 17+ device exists
-                    if status.status.as_deref() == Some("password_required") {
-                        self.show_password_modal = true;
-                    }
-                    if let Some(ref err) = status.error {
-                        self.status_message = format!("Tunnel: {err}");
-                        self.status_is_error = true;
-                    }
-                    self.tunnel_status = status;
-                }
-                DaemonEvent::Error(err) => {
-                    self.status_message = format!("Error: {err}");
+                DaemonEvent::Error(message) => {
+                    self.status_message = format!("Error: {message}");
                     self.status_is_error = true;
                 }
             }
         }
 
+        // Poll geocoding async responses
         if let Some(results) = self.geocoding.poll_results() {
             self.suggestions = results;
             self.show_suggestions = !self.suggestions.is_empty();
@@ -340,294 +304,110 @@ fn dirs_cache_dir() -> Option<std::path::PathBuf> {
 impl eframe::App for LocationSimulatorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_background_events();
+        let pal = theme::palette(true);
 
         // =========================================================================
-        // 1. TOP TOOLBAR & SEARCH (Dark macOS Style)
+        // 1. SPACIOUS TABLEX STATUS FOOTER BAR (Height 48pt - Not Tight!)
         // =========================================================================
-        egui::TopBottomPanel::top("top_toolbar")
+        egui::TopBottomPanel::bottom("tablex_footer")
+            .exact_height(48.0)
             .frame(
                 egui::Frame::NONE
-                    .fill(DarkTheme::HEADER_BG)
-                    .inner_margin(Margin::symmetric(20, 11))
-                    .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER)),
+                    .fill(pal.chrome)
+                    .inner_margin(Margin::symmetric(18, 8))
+                    .stroke(Stroke::new(1.0_f32, pal.separator)),
             )
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    // App Brand with subtle vector target icon
-                    ui.horizontal(|ui| {
-                        let icon_center = ui.cursor().min + Vec2::new(8.0, 10.0);
-                        ui.painter().circle_stroke(
-                            icon_center,
-                            6.0_f32,
-                            Stroke::new(1.5_f32, DarkTheme::ACCENT_BLUE),
-                        );
-                        ui.painter().circle_filled(
-                            icon_center,
-                            2.5_f32,
-                            DarkTheme::ACCENT_CYAN,
-                        );
-                        ui.add_space(22.0);
-
-                        ui.label(
-                            egui::RichText::new("LOCATION SIMULATOR")
-                                .font(FontId::proportional(13.0))
-                                .strong()
-                                .color(DarkTheme::TEXT_TITLE),
-                        );
-
-                        ui.add_space(6.0);
-                        ui.label(
-                            egui::RichText::new("v1.0")
-                                .font(FontId::monospace(10.5))
-                                .color(DarkTheme::TEXT_MUTED),
-                        );
-                    });
-
-                    ui.add_space(24.0);
-
-                    // Dark Spotlight Search Input
-                    let search_width = (ui.available_width() - 340.0).max(240.0);
-                    let search_frame = egui::Frame::NONE
-                        .fill(DarkTheme::INSET_BG)
-                        .corner_radius(CornerRadius::same(7))
-                        .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER))
-                        .inner_margin(Margin::symmetric(12, 5));
-
-                    search_frame.show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            // Painted vector search glass icon
-                            let glass_center = ui.cursor().min + Vec2::new(6.0, 9.0);
-                            ui.painter().circle_stroke(
-                                glass_center,
-                                4.5_f32,
-                                Stroke::new(1.2_f32, DarkTheme::TEXT_MUTED),
-                            );
-                            ui.painter().line_segment(
-                                [
-                                    glass_center + Vec2::new(3.5, 3.5),
-                                    glass_center + Vec2::new(7.0, 7.0),
-                                ],
-                                Stroke::new(1.5_f32, DarkTheme::TEXT_MUTED),
-                            );
-                            ui.add_space(18.0);
-
-                            let search_edit = ui.add_sized(
-                                [search_width - 65.0, 20.0],
-                                egui::TextEdit::singleline(&mut self.search_query)
-                                    .hint_text("Search city, address, or enter coordinates (lat, lon)...")
-                                    .text_color(DarkTheme::TEXT_PRIMARY)
-                                    .frame(false),
-                            );
-
-                            if !self.search_query.is_empty() {
-                                if ui.small_button("✕").clicked() {
-                                    self.search_query.clear();
-                                    self.suggestions.clear();
-                                    self.show_suggestions = false;
-                                }
-                            }
-
-                            if search_edit.changed() {
-                                let query = self.search_query.trim().to_string();
-                                if query.len() >= 2 && query != self.last_searched_query {
-                                    self.last_searched_query = query.clone();
-                                    self.geocoding.search(query);
-                                } else if query.is_empty() {
-                                    self.suggestions.clear();
-                                    self.show_suggestions = false;
-                                }
-                            }
-
-                            if search_edit.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                if let Some((lat, lon)) = parse_coordinates(&self.search_query) {
-                                    self.jump_to(lat, lon);
-                                    self.show_suggestions = false;
-                                } else if let Some(first) = self.suggestions.first() {
-                                    self.jump_to(first.lat, first.lon);
-                                    self.show_suggestions = false;
-                                }
-                            }
-                        });
-                    });
-
-                    // Right Actions
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui
-                            .button(
-                                egui::RichText::new("About")
-                                    .font(FontId::proportional(12.0))
-                                    .color(DarkTheme::TEXT_SECONDARY),
-                            )
-                            .clicked()
-                        {
-                            self.show_about_modal = true;
-                        }
-
-                        // Tunnel Status Pill
-                        if self.tunnel_status.running {
-                            let pill = egui::Button::new(
-                                egui::RichText::new("● TUNNEL ACTIVE")
-                                    .font(FontId::proportional(11.0))
-                                    .color(DarkTheme::ACCENT_GREEN)
-                                    .strong(),
-                            )
-                            .fill(DarkTheme::ACCENT_GREEN_BG)
-                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(34, 120, 60)))
-                            .corner_radius(CornerRadius::same(12));
-
-                            if ui.add(pill).on_hover_text("iOS 17+ tunnel is active. Click to stop.").clicked() {
-                                self.daemon.stop_tunnel();
-                            }
-                        } else {
-                            let pill = egui::Button::new(
-                                egui::RichText::new("○ TUNNEL (iOS 17+)")
-                                    .font(FontId::proportional(11.0))
-                                    .color(DarkTheme::TEXT_MUTED),
-                            )
-                            .fill(DarkTheme::CARD_BG)
-                            .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER))
-                            .corner_radius(CornerRadius::same(12));
-
-                            if ui.add(pill).on_hover_text("Start RemoteXPC tunnel required for iOS 17+ devices").clicked() {
-                                self.daemon.start_tunnel();
-                                self.status_message = "Starting iOS 17+ tunnel daemon...".to_string();
-                            }
-                        }
-                    });
-                });
-
-                // Autocomplete Flyout Window
-                if self.show_suggestions && !self.suggestions.is_empty() {
-                    ui.add_space(6.0);
-                    let flyout = egui::Frame::NONE
-                        .fill(DarkTheme::CARD_BG)
-                        .corner_radius(CornerRadius::same(8))
-                        .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER_LIGHT))
-                        .inner_margin(Margin::symmetric(14, 10));
-
-                    flyout.show(ui, |ui| {
-                        let mut chosen = None;
-                        for item in self.suggestions.iter().take(4) {
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("•").color(DarkTheme::ACCENT_CYAN));
-                                let text = if item.display_name.len() > 70 {
-                                    format!("{}...", &item.display_name[..70])
-                                } else {
-                                    item.display_name.clone()
-                                };
-                                if ui
-                                    .link(
-                                        egui::RichText::new(text)
-                                            .font(FontId::proportional(12.5))
-                                            .color(DarkTheme::TEXT_PRIMARY),
-                                    )
-                                    .clicked()
-                                {
-                                    chosen = Some((item.lat, item.lon));
-                                }
-                            });
-                            ui.add_space(2.0);
-                        }
-                        if let Some((lat, lon)) = chosen {
-                            self.jump_to(lat, lon);
-                            self.show_suggestions = false;
-                        }
-                    });
-                }
-            });
-
-        // =========================================================================
-        // 2. BOTTOM CONTROL & STATUS BAR
-        // =========================================================================
-        egui::TopBottomPanel::bottom("bottom_bar")
-            .frame(
-                egui::Frame::NONE
-                    .fill(DarkTheme::BOTTOM_BG)
-                    .inner_margin(Margin::symmetric(22, 12))
-                    .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER)),
-            )
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    // Status dot & text
+                ui.horizontal_centered(|ui| {
+                    // Status glowing dot
                     let dot_color = if self.status_is_error {
-                        DarkTheme::ACCENT_RED
+                        pal.danger
                     } else if self.status_message.starts_with("Setting") || self.status_message.starts_with("Starting") {
-                        DarkTheme::ACCENT_AMBER
+                        pal.accent
                     } else {
-                        DarkTheme::ACCENT_GREEN
+                        pal.ok
                     };
 
-                    let dot_center = ui.cursor().min + Vec2::new(4.0, 9.0);
-                    ui.painter().circle_filled(dot_center, 3.5_f32, dot_color);
-                    ui.add_space(14.0);
+                    let dot_center = ui.cursor().min + Vec2::new(6.0, 16.0);
+                    ui.painter().circle_filled(dot_center, 4.0_f32, dot_color);
+                    ui.add_space(18.0);
 
+                    // Status Message + Realtime Map Coordinates
+                    let (cur_lat, cur_lon) = self.current_center_coordinates();
                     ui.label(
                         egui::RichText::new(&self.status_message)
-                            .font(FontId::proportional(12.5))
-                            .color(if self.status_is_error { DarkTheme::ACCENT_RED } else { DarkTheme::TEXT_SECONDARY }),
+                            .font(theme::ui(12.5))
+                            .color(if self.status_is_error { pal.danger } else { pal.text }),
                     );
 
-                    // Right Side Action Buttons
+                    ui.add_space(8.0);
+                    ui.label(
+                        egui::RichText::new(format!("({cur_lat:.6}°, {cur_lon:.6}°)",))
+                            .font(theme::mono(11.0))
+                            .color(pal.text_faint),
+                    );
+
+                    // Right Side Action Buttons: Generous, comfortable 34pt height buttons
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let (cur_lat, cur_lon) = self.current_center_coordinates();
                         let has_device = self.selected_udid.is_some() || !self.devices.is_empty();
 
-                        // Primary Action: "Simulate Location" (Electric Apple Blue)
+                        // Primary Action: "Simulate Location" (TableX Accent Blue #4C8DFF)
                         let set_btn = egui::Button::new(
                             egui::RichText::new("Simulate Location")
-                                .font(FontId::proportional(13.5))
-                                .strong()
+                                .font(theme::semi(12.5))
                                 .color(Color32::WHITE),
                         )
                         .fill(if has_device {
-                            DarkTheme::ACCENT_BLUE
+                            pal.accent
                         } else {
-                            Color32::from_rgb(40, 50, 70)
+                            pal.button
                         })
-                        .corner_radius(CornerRadius::same(6));
+                        .stroke(Stroke::new(1.0_f32, if has_device { pal.accent } else { pal.separator }))
+                        .corner_radius(CornerRadius::same(theme::RADIUS_SM));
 
                         if ui
-                            .add_enabled(has_device, set_btn)
-                            .on_hover_text("Send simulated GPS coordinates to selected device")
+                            .add_sized([135.0, 32.0], set_btn)
+                            .on_hover_text("Send simulated GPS coordinates to selected iOS device")
                             .clicked()
                         {
                             self.daemon.set_location(self.selected_udid.as_deref(), cur_lat, cur_lon);
-                            self.status_message = format!("Simulating coordinates: {cur_lat:.5}, {cur_lon:.5}...");
+                            self.status_message = format!("Simulating position: {cur_lat:.5}, {cur_lon:.5}...");
                             self.status_is_error = false;
                         }
 
-                        // Clear Button: Subtle dark red outline
+                        // Clear Location (TableX Danger Pill)
                         let clear_btn = egui::Button::new(
                             egui::RichText::new("Clear Location")
-                                .font(FontId::proportional(12.5))
-                                .color(DarkTheme::ACCENT_RED),
+                                .font(theme::ui(12.0))
+                                .color(pal.danger),
                         )
-                        .fill(DarkTheme::ACCENT_RED_BG)
-                        .stroke(Stroke::new(1.0_f32, Color32::from_rgb(120, 30, 40)))
-                        .corner_radius(CornerRadius::same(6));
+                        .fill(pal.danger_bg)
+                        .stroke(Stroke::new(1.0_f32, pal.separator))
+                        .corner_radius(CornerRadius::same(theme::RADIUS_SM));
 
                         if ui
-                            .add_enabled(has_device, clear_btn)
-                            .on_hover_text("Reset device to actual physical GPS location")
+                            .add_sized([105.0, 32.0], clear_btn)
+                            .on_hover_text("Stop location simulation on iOS device and restore real GPS")
                             .clicked()
                         {
                             self.daemon.clear_location(self.selected_udid.as_deref());
-                            self.status_message = "Restoring device hardware GPS...".to_string();
+                            self.status_message = "Restored real GPS location".to_string();
                             self.status_is_error = false;
                         }
 
-                        // Save Bookmark Button
+                        // Save Bookmark button
                         let save_btn = egui::Button::new(
                             egui::RichText::new("Save Bookmark")
-                                .font(FontId::proportional(12.5))
-                                .color(DarkTheme::TEXT_PRIMARY),
+                                .font(theme::ui(12.0))
+                                .color(pal.text),
                         )
-                        .fill(DarkTheme::CARD_BG)
-                        .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER))
-                        .corner_radius(CornerRadius::same(6));
+                        .fill(pal.elevated)
+                        .stroke(Stroke::new(1.0_f32, pal.separator))
+                        .corner_radius(CornerRadius::same(theme::RADIUS_SM));
 
-                        if ui.add(save_btn).clicked() {
-                            self.save_name_input = format!("Location ({cur_lat:.4}, {cur_lon:.4})");
+                        if ui.add_sized([115.0, 32.0], save_btn).clicked() {
+                            let (lat, lon) = self.current_center_coordinates();
+                            self.save_name_input = format!("Location {:.4}, {:.4}", lat, lon);
                             self.show_save_modal = true;
                         }
                     });
@@ -635,222 +415,207 @@ impl eframe::App for LocationSimulatorApp {
             });
 
         // =========================================================================
-        // 3. LEFT SIDEBAR (Dark Cards & Segmented Tabs)
+        // 2. UNIFIED LEFT NAVBAR (Contains Device Pill, Tunnel, Import, Bookmarks)
         // =========================================================================
-        egui::SidePanel::left("left_sidebar")
-            .exact_width(295.0)
+        // NO MORE TOP BAR! The left sidebar reaches the very top of the window,
+        // cleanly accommodating macOS traffic lights and all primary controls.
+        egui::SidePanel::left("unified_left_navbar")
+            .exact_width(300.0)
+            .resizable(false)
             .frame(
                 egui::Frame::NONE
-                    .fill(DarkTheme::SIDEBAR_BG)
-                    .inner_margin(Margin::symmetric(14, 14))
-                    .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER)),
+                    .fill(pal.sidebar)
+                    .inner_margin(Margin {
+                        left: 14,
+                        right: 14,
+                        top: if cfg!(target_os = "macos") { 42 } else { 14 },
+                        bottom: 12,
+                    })
+                    .stroke(Stroke::new(1.0_f32, pal.separator)),
             )
             .show(ctx, |ui| {
-                // Section Header: Devices
+                // Header Row: App Brand Title & Utility Buttons
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("CONNECTED DEVICES")
-                            .font(FontId::proportional(11.0))
-                            .strong()
-                            .color(DarkTheme::TEXT_MUTED),
-                    );
-
-                    ui.label(
-                        egui::RichText::new(format!("({})", self.devices.len()))
-                            .font(FontId::monospace(10.5))
-                            .color(DarkTheme::TEXT_SECONDARY),
+                        egui::RichText::new("Location Simulator")
+                            .font(theme::semi(13.5))
+                            .color(pal.text),
                     );
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui
-                            .button(
-                                egui::RichText::new("↻ Refresh")
-                                    .font(FontId::proportional(11.0))
-                                    .color(DarkTheme::TEXT_CYAN),
-                            )
-                            .clicked()
-                        {
+                        // About Dialog Button
+                        if widgets::toolbar_icon(ui, Icon::More, "About Location Simulator", false).clicked() {
+                            self.show_about_modal = true;
+                        }
+
+                        // Import GPX Route
+                        if widgets::toolbar_icon(ui, Icon::Import, "Import GPX Track", false).clicked() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("GPX Routes", &["gpx"])
+                                .pick_file()
+                            {
+                                if let Some(path_str) = path.to_str() {
+                                    self.daemon.import_gpx(path_str);
+                                    self.status_message = format!("Imported route: {}", path.file_name().unwrap_or_default().to_string_lossy());
+                                }
+                            }
+                        }
+
+                        // Refresh Connected Devices
+                        if widgets::toolbar_icon(ui, Icon::Refresh, "Refresh Connected Devices", false).clicked() {
                             self.daemon.refresh_devices();
                         }
                     });
                 });
 
-                ui.add_space(8.0);
+                ui.add_space(10.0);
 
-                // Devices List
-                if self.devices.is_empty() {
-                    let empty = egui::Frame::NONE
-                        .fill(DarkTheme::CARD_BG)
-                        .corner_radius(CornerRadius::same(8))
-                        .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER))
-                        .inner_margin(Margin::symmetric(16, 18));
-
-                    empty.show(ui, |ui| {
-                        ui.vertical_centered(|ui| {
-                            // Painted vector phone shape
-                            let phone_rect = Rect::from_center_size(
-                                ui.cursor().min + Vec2::new(ui.available_width() / 2.0, 14.0),
-                                Vec2::new(18.0, 26.0),
-                            );
-                            ui.painter().rect_stroke(
-                                phone_rect,
-                                CornerRadius::same(4),
-                                Stroke::new(1.5_f32, DarkTheme::TEXT_MUTED),
-                                StrokeKind::Outside,
-                            );
-                            ui.painter().circle_filled(
-                                Pos2::new(phone_rect.center().x, phone_rect.bottom() - 4.0),
-                                1.5_f32,
-                                DarkTheme::TEXT_MUTED,
-                            );
-                            ui.add_space(34.0);
-
-                            ui.label(
-                                egui::RichText::new("No iOS Device Found")
-                                    .font(FontId::proportional(13.0))
-                                    .strong()
-                                    .color(DarkTheme::TEXT_PRIMARY),
-                            );
-                            ui.add_space(2.0);
-                            ui.label(
-                                egui::RichText::new("Connect via USB cable and trust this computer on your device.")
-                                    .font(FontId::proportional(11.0))
-                                    .color(DarkTheme::TEXT_MUTED),
-                            );
-                        });
-                    });
+                // --- CONNECTED DEVICE CARD ---
+                let (dev_name, dev_desc, dev_dot) = if let Some(selected) = self
+                    .devices
+                    .iter()
+                    .find(|d| Some(&d.udid) == self.selected_udid.as_ref())
+                {
+                    (
+                        selected.name.clone(),
+                        format!("{} · iOS {}", selected.model, selected.ios_version),
+                        pal.ok,
+                    )
+                } else if let Some(first) = self.devices.first() {
+                    (
+                        first.name.clone(),
+                        format!("{} · iOS {}", first.model, first.ios_version),
+                        pal.ok,
+                    )
                 } else {
-                    egui::ScrollArea::vertical()
-                        .max_height(160.0)
-                        .id_salt("devices_list_scroll")
-                        .show(ui, |ui| {
-                            for dev in &self.devices {
-                                let is_selected = self.selected_udid.as_deref() == Some(&dev.udid);
+                    (
+                        "No Device Connected".to_string(),
+                        "Connect iPhone/iPad via USB".to_string(),
+                        pal.text_faint,
+                    )
+                };
 
-                                let (card_bg, border_color, border_w) = if is_selected {
-                                    (
-                                        DarkTheme::CARD_SELECTED,
-                                        DarkTheme::BORDER_ACTIVE,
-                                        1.5_f32,
-                                    )
-                                } else {
-                                    (
-                                        DarkTheme::CARD_BG,
-                                        DarkTheme::BORDER,
-                                        1.0_f32,
-                                    )
-                                };
+                let card_rect = ui
+                    .allocate_exact_size(egui::vec2(ui.available_width(), 48.0), egui::Sense::hover())
+                    .0;
 
-                                let card = egui::Frame::NONE
-                                    .fill(card_bg)
-                                    .corner_radius(CornerRadius::same(8))
-                                    .stroke(Stroke::new(border_w, border_color))
-                                    .inner_margin(Margin::symmetric(12, 10));
+                ui.painter().rect_filled(card_rect, CornerRadius::same(theme::RADIUS_SM), pal.chrome);
+                ui.painter().rect_stroke(
+                    card_rect,
+                    CornerRadius::same(theme::RADIUS_SM),
+                    Stroke::new(1.0_f32, pal.separator),
+                    StrokeKind::Inside,
+                );
 
-                                card.show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        // Left Device Avatar Badge
-                                        let badge_rect = Rect::from_min_size(ui.cursor().min, Vec2::new(32.0, 32.0));
-                                        ui.painter().rect_filled(
-                                            badge_rect,
-                                            CornerRadius::same(6),
-                                            if is_selected { Color32::from_rgb(16, 40, 72) } else { DarkTheme::INSET_BG },
-                                        );
-                                        ui.painter().text(
-                                            badge_rect.center(),
-                                            Align2::CENTER_CENTER,
-                                            "iOS",
-                                            FontId::monospace(10.5),
-                                            if is_selected { DarkTheme::TEXT_CYAN } else { DarkTheme::TEXT_MUTED },
-                                        );
-                                        ui.add_space(38.0);
+                let plug_icon_rect = Rect::from_center_size(
+                    card_rect.left_center() + Vec2::new(18.0, 0.0),
+                    Vec2::new(16.0, 16.0),
+                );
+                icons::paint(ui.painter(), plug_icon_rect, Icon::Plug, dev_dot);
 
-                                        // Device Info Stack
-                                        ui.vertical(|ui| {
-                                            ui.horizontal(|ui| {
-                                                let name_label = egui::RichText::new(&dev.name)
-                                                    .font(FontId::proportional(13.0))
-                                                    .strong()
-                                                    .color(DarkTheme::TEXT_TITLE);
+                ui.painter().text(
+                    card_rect.left_center() + Vec2::new(36.0, -8.0),
+                    Align2::LEFT_CENTER,
+                    &dev_name,
+                    theme::semi(12.5),
+                    pal.text,
+                );
+                ui.painter().text(
+                    card_rect.left_center() + Vec2::new(36.0, 8.0),
+                    Align2::LEFT_CENTER,
+                    &dev_desc,
+                    theme::mono(10.0),
+                    pal.text_muted,
+                );
 
-                                                if ui.selectable_label(is_selected, name_label).clicked() {
-                                                    self.selected_udid = Some(dev.udid.clone());
-                                                    self.daemon.select_device(&dev.udid);
-                                                }
-                                            });
+                ui.add_space(6.0);
 
-                                            ui.label(
-                                                egui::RichText::new(format!("{} · iOS {}", dev.model, dev.ios_version))
-                                                    .font(FontId::proportional(11.0))
-                                                    .color(DarkTheme::TEXT_SECONDARY),
-                                            );
+                // --- TUNNEL STATUS BAR (iOS 17+) ---
+                let tunnel_running = self.tunnel_status.running;
+                let tunnel_rect = ui
+                    .allocate_exact_size(egui::vec2(ui.available_width(), 32.0), egui::Sense::click());
 
-                                            ui.label(
-                                                egui::RichText::new(format!("● Connected ({})", dev.connection_type))
-                                                    .font(FontId::proportional(10.5))
-                                                    .color(DarkTheme::ACCENT_GREEN),
-                                            );
-                                        });
-                                    });
-                                });
-                                ui.add_space(6.0);
-                            }
-                        });
+                let tunnel_bg = if tunnel_rect.1.hovered() { pal.hover } else { pal.chrome };
+                ui.painter().rect_filled(tunnel_rect.0, CornerRadius::same(theme::RADIUS_SM), tunnel_bg);
+                ui.painter().rect_stroke(
+                    tunnel_rect.0,
+                    CornerRadius::same(theme::RADIUS_SM),
+                    Stroke::new(1.0_f32, if tunnel_running { pal.accent } else { pal.separator }),
+                    StrokeKind::Inside,
+                );
+
+                let tunnel_icon_rect = Rect::from_center_size(
+                    tunnel_rect.0.left_center() + Vec2::new(18.0, 0.0),
+                    Vec2::new(14.0, 14.0),
+                );
+                icons::paint(
+                    ui.painter(),
+                    tunnel_icon_rect,
+                    if tunnel_running { Icon::Lock } else { Icon::Unlock },
+                    if tunnel_running { pal.ok } else { pal.text_muted },
+                );
+
+                ui.painter().text(
+                    tunnel_rect.0.left_center() + Vec2::new(36.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    if tunnel_running { "RemoteXPC Tunnel: Active" } else { "RemoteXPC Tunnel: Inactive" },
+                    theme::ui(11.5),
+                    if tunnel_running { pal.ok } else { pal.text_muted },
+                );
+
+                // Start/Stop action text on right
+                ui.painter().text(
+                    tunnel_rect.0.right_center() - Vec2::new(12.0, 0.0),
+                    Align2::RIGHT_CENTER,
+                    if tunnel_running { "Stop" } else { "Start" },
+                    theme::semi(11.0),
+                    if tunnel_running { pal.danger } else { pal.accent },
+                );
+
+                if tunnel_rect.1.clicked() {
+                    if tunnel_running {
+                        self.daemon.stop_tunnel();
+                    } else {
+                        self.daemon.start_tunnel();
+                        self.status_message = "Starting RemoteXPC tunnel daemon...".to_string();
+                    }
                 }
 
                 ui.add_space(10.0);
                 ui.separator();
                 ui.add_space(8.0);
 
-                // Segmented Tab Switcher (Dark Inset Container)
-                let tab_container = egui::Frame::NONE
-                    .fill(DarkTheme::INSET_BG)
-                    .corner_radius(CornerRadius::same(7))
-                    .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER))
-                    .inner_margin(Margin::symmetric(3, 3));
+                // Navigation Tabs (Saved Places / GPX Routes)
+                ui.horizontal(|ui| {
+                    let w = (ui.available_width() - 4.0) / 2.0;
 
-                tab_container.show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let btn_width = (ui.available_width() - 8.0) / 2.0;
+                    let loc_active = self.active_tab == SidebarTab::Locations;
+                    let loc_btn = egui::Button::new(
+                        egui::RichText::new("Saved Places")
+                            .font(theme::semi(12.0))
+                            .color(if loc_active { pal.text } else { pal.text_muted }),
+                    )
+                    .fill(if loc_active { pal.selection } else { pal.button })
+                    .stroke(Stroke::new(1.0_f32, if loc_active { pal.accent } else { pal.separator }))
+                    .corner_radius(CornerRadius::same(theme::RADIUS_SM));
 
-                        let is_loc = self.active_tab == SidebarTab::Locations;
-                        let loc_btn = egui::Button::new(
-                            egui::RichText::new("Saved Places")
-                                .font(FontId::proportional(12.0))
-                                .strong()
-                                .color(if is_loc { DarkTheme::TEXT_TITLE } else { DarkTheme::TEXT_MUTED }),
-                        )
-                        .fill(if is_loc { DarkTheme::CARD_BG } else { Color32::TRANSPARENT })
-                        .stroke(if is_loc {
-                            Stroke::new(1.0_f32, DarkTheme::BORDER_LIGHT)
-                        } else {
-                            Stroke::NONE
-                        })
-                        .corner_radius(CornerRadius::same(5));
+                    if ui.add_sized([w, 28.0], loc_btn).clicked() {
+                        self.active_tab = SidebarTab::Locations;
+                    }
 
-                        if ui.add_sized([btn_width, 24.0], loc_btn).clicked() {
-                            self.active_tab = SidebarTab::Locations;
-                        }
+                    let r_active = self.active_tab == SidebarTab::Routes;
+                    let r_btn = egui::Button::new(
+                        egui::RichText::new("GPX Routes")
+                            .font(theme::semi(12.0))
+                            .color(if r_active { pal.text } else { pal.text_muted }),
+                    )
+                    .fill(if r_active { pal.selection } else { pal.button })
+                    .stroke(Stroke::new(1.0_f32, if r_active { pal.accent } else { pal.separator }))
+                    .corner_radius(CornerRadius::same(theme::RADIUS_SM));
 
-                        let is_routes = self.active_tab == SidebarTab::Routes;
-                        let routes_btn = egui::Button::new(
-                            egui::RichText::new("GPX Tracks")
-                                .font(FontId::proportional(12.0))
-                                .strong()
-                                .color(if is_routes { DarkTheme::TEXT_TITLE } else { DarkTheme::TEXT_MUTED }),
-                        )
-                        .fill(if is_routes { DarkTheme::CARD_BG } else { Color32::TRANSPARENT })
-                        .stroke(if is_routes {
-                            Stroke::new(1.0_f32, DarkTheme::BORDER_LIGHT)
-                        } else {
-                            Stroke::NONE
-                        })
-                        .corner_radius(CornerRadius::same(5));
-
-                        if ui.add_sized([btn_width, 24.0], routes_btn).clicked() {
-                            self.active_tab = SidebarTab::Routes;
-                        }
-                    });
+                    if ui.add_sized([w, 28.0], r_btn).clicked() {
+                        self.active_tab = SidebarTab::Routes;
+                    }
                 });
 
                 ui.add_space(8.0);
@@ -860,95 +625,113 @@ impl eframe::App for LocationSimulatorApp {
                     ui.horizontal(|ui| {
                         ui.label(
                             egui::RichText::new(format!("BOOKMARKS ({})", self.saved_locations.len()))
-                                .font(FontId::proportional(11.0))
-                                .strong()
-                                .color(DarkTheme::TEXT_MUTED),
+                                .font(theme::semi(10.5))
+                                .color(pal.text_faint),
                         );
-
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui
-                                .button(
-                                    egui::RichText::new("+ Save Current")
-                                        .font(FontId::proportional(11.0))
-                                        .color(DarkTheme::TEXT_CYAN),
-                                )
-                                .clicked()
-                            {
+                            if ui.button(egui::RichText::new("+ Save").font(theme::semi(11.0))).clicked() {
                                 let (lat, lon) = self.current_center_coordinates();
-                                self.save_name_input = format!("Location ({lat:.4}, {lon:.4})");
+                                self.save_name_input = format!("Location {:.4}, {:.4}", lat, lon);
                                 self.show_save_modal = true;
                             }
                         });
                     });
 
-                    ui.add_space(6.0);
+                    ui.add_space(4.0);
 
                     egui::ScrollArea::vertical()
-                        .id_salt("places_list_scroll")
+                        .id_salt("saved_locations_scroll")
                         .show(ui, |ui| {
-                            let mut loc_to_remove = None;
                             let mut loc_to_jump = None;
                             let mut loc_to_set = None;
+                            let mut loc_to_remove = None;
 
                             for loc in &self.saved_locations {
-                                let row = egui::Frame::NONE
-                                    .fill(DarkTheme::CARD_BG)
-                                    .corner_radius(CornerRadius::same(7))
-                                    .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER))
-                                    .inner_margin(Margin::symmetric(12, 8));
+                                let item_h = 44.0_f32;
+                                let (item_rect, item_resp) = ui.allocate_exact_size(
+                                    egui::vec2(ui.available_width(), item_h),
+                                    egui::Sense::click(),
+                                );
 
-                                row.show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        // Category color dot
-                                        let cat_color = match loc.category.as_str() {
-                                            "work" => DarkTheme::ACCENT_BLUE,
-                                            "home" => Color32::from_rgb(168, 85, 247),
-                                            _ => DarkTheme::TEXT_CYAN,
-                                        };
+                                let bg = if item_resp.hovered() { pal.hover } else { pal.chrome };
+                                ui.painter().rect_filled(item_rect, CornerRadius::same(theme::RADIUS_SM), bg);
+                                ui.painter().rect_stroke(
+                                    item_rect,
+                                    CornerRadius::same(theme::RADIUS_SM),
+                                    Stroke::new(1.0_f32, pal.separator),
+                                    StrokeKind::Inside,
+                                );
 
-                                        let dot_pos = ui.cursor().min + Vec2::new(3.0, 8.0);
-                                        ui.painter().circle_filled(dot_pos, 3.0_f32, cat_color);
-                                        ui.add_space(12.0);
+                                // Category dot
+                                let cat_color = match loc.category.as_str() {
+                                    "work" => pal.accent,
+                                    "home" => pal.ok,
+                                    _ => pal.text_muted,
+                                };
+                                ui.painter().circle_filled(item_rect.left_center() + Vec2::new(10.0, 0.0), 3.5_f32, cat_color);
 
-                                        ui.vertical(|ui| {
-                                            if ui
-                                                .link(
-                                                    egui::RichText::new(&loc.name)
-                                                        .font(FontId::proportional(12.5))
-                                                        .strong()
-                                                        .color(DarkTheme::TEXT_PRIMARY),
-                                                )
-                                                .clicked()
-                                            {
-                                                loc_to_jump = Some((loc.latitude, loc.longitude));
-                                            }
+                                // Place title
+                                ui.painter().text(
+                                    item_rect.left_center() + Vec2::new(22.0, -7.0),
+                                    Align2::LEFT_CENTER,
+                                    &loc.name,
+                                    theme::semi(12.0),
+                                    pal.text,
+                                );
 
-                                            ui.label(
-                                                egui::RichText::new(format!("{:.4}, {:.4}", loc.latitude, loc.longitude))
-                                                    .font(FontId::monospace(10.0))
-                                                    .color(DarkTheme::TEXT_MUTED),
-                                            );
-                                        });
+                                // Coordinates
+                                ui.painter().text(
+                                    item_rect.left_center() + Vec2::new(22.0, 8.0),
+                                    Align2::LEFT_CENTER,
+                                    format!("{:.4}, {:.4}", loc.latitude, loc.longitude),
+                                    theme::mono(10.0),
+                                    pal.text_faint,
+                                );
 
-                                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                            if ui.small_button("✕").on_hover_text("Delete bookmark").clicked() {
-                                                loc_to_remove = Some(loc.id.clone());
-                                            }
-                                            if ui
-                                                .button(
-                                                    egui::RichText::new("Set")
-                                                        .font(FontId::proportional(11.0))
-                                                        .color(DarkTheme::TEXT_CYAN),
-                                                )
-                                                .on_hover_text("Teleport directly to this place")
-                                                .clicked()
-                                            {
-                                                loc_to_set = Some((loc.latitude, loc.longitude));
-                                            }
-                                        });
-                                    });
-                                });
-                                ui.add_space(4.0);
+                                // Right Action Buttons: Generous, comfortable 28x28 hit targets!
+                                let right_center = item_rect.right_center();
+                                let del_rect = Rect::from_center_size(right_center - Vec2::new(16.0, 0.0), Vec2::new(28.0, 28.0));
+                                let set_rect = Rect::from_center_size(right_center - Vec2::new(48.0, 0.0), Vec2::new(28.0, 28.0));
+
+                                let is_del_hovered = item_resp.interact_pointer_pos().map_or(false, |p| del_rect.contains(p));
+                                let is_set_hovered = item_resp.interact_pointer_pos().map_or(false, |p| set_rect.contains(p));
+
+                                // Set button
+                                let set_bg = if is_set_hovered { pal.selection } else { Color32::TRANSPARENT };
+                                ui.painter().rect_filled(set_rect, CornerRadius::same(theme::RADIUS_SM), set_bg);
+                                if is_set_hovered {
+                                    ui.painter().rect_stroke(set_rect, CornerRadius::same(theme::RADIUS_SM), Stroke::new(1.0_f32, pal.accent), StrokeKind::Inside);
+                                }
+                                let set_icon_rect = Rect::from_center_size(set_rect.center(), Vec2::new(15.0, 15.0));
+                                icons::paint(ui.painter(), set_icon_rect, Icon::Play, pal.accent);
+
+                                // Delete button: Generous 28x28 target with unmistakable danger hover feedback
+                                let del_bg = if is_del_hovered { pal.danger_bg } else { Color32::TRANSPARENT };
+                                ui.painter().rect_filled(del_rect, CornerRadius::same(theme::RADIUS_SM), del_bg);
+                                if is_del_hovered {
+                                    ui.painter().rect_stroke(del_rect, CornerRadius::same(theme::RADIUS_SM), Stroke::new(1.0_f32, pal.danger), StrokeKind::Inside);
+                                }
+                                let del_icon_rect = Rect::from_center_size(del_rect.center(), Vec2::new(15.0, 15.0));
+                                icons::paint(
+                                    ui.painter(),
+                                    del_icon_rect,
+                                    Icon::Trash,
+                                    if is_del_hovered { pal.danger } else { pal.text_muted },
+                                );
+
+                                if item_resp.clicked() {
+                                    if let Some(pos) = item_resp.interact_pointer_pos() {
+                                        if del_rect.contains(pos) {
+                                            loc_to_remove = Some(loc.id.clone());
+                                        } else if set_rect.contains(pos) {
+                                            loc_to_set = Some((loc.latitude, loc.longitude));
+                                        } else {
+                                            loc_to_jump = Some((loc.latitude, loc.longitude));
+                                        }
+                                    }
+                                }
+
+                                ui.add_space(3.0);
                             }
 
                             if let Some((lat, lon)) = loc_to_jump {
@@ -963,79 +746,99 @@ impl eframe::App for LocationSimulatorApp {
                             }
                         });
                 }
-                // TAB 2: GPX TRACKS
+                // TAB 2: GPX ROUTES
                 else {
-                    let import_btn = egui::Button::new(
-                        egui::RichText::new("Import GPX Route...")
-                            .font(FontId::proportional(12.5))
-                            .color(DarkTheme::TEXT_CYAN)
-                            .strong(),
-                    )
-                    .fill(Color32::from_rgb(18, 36, 56))
-                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(30, 60, 96)))
-                    .corner_radius(CornerRadius::same(6));
-
-                    if ui.add_sized([ui.available_width(), 30.0], import_btn).clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("GPX Routes", &["gpx"])
-                            .pick_file()
-                        {
+                    if ui.add_sized([ui.available_width(), 28.0], egui::Button::new("+ Import GPX...").fill(pal.button)).clicked() {
+                        if let Some(path) = rfd::FileDialog::new().add_filter("GPX Routes", &["gpx"]).pick_file() {
                             if let Some(path_str) = path.to_str() {
                                 self.daemon.import_gpx(path_str);
-                                self.status_message = format!("Imported route: {}", path.file_name().unwrap_or_default().to_string_lossy());
                             }
                         }
                     }
 
-                    ui.add_space(8.0);
+                    ui.add_space(6.0);
 
                     egui::ScrollArea::vertical()
-                        .id_salt("routes_list_scroll")
+                        .id_salt("routes_scroll")
                         .show(ui, |ui| {
                             let mut route_to_remove = None;
                             let mut route_to_start = None;
 
                             for route in &self.gpx_routes {
-                                let card = egui::Frame::NONE
-                                    .fill(DarkTheme::CARD_BG)
-                                    .corner_radius(CornerRadius::same(7))
-                                    .stroke(Stroke::new(1.0_f32, DarkTheme::BORDER))
-                                    .inner_margin(Margin::symmetric(12, 10));
+                                let item_h = 44.0_f32;
+                                let (item_rect, item_resp) = ui.allocate_exact_size(
+                                    egui::vec2(ui.available_width(), item_h),
+                                    egui::Sense::click(),
+                                );
 
-                                card.show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.vertical(|ui| {
-                                            ui.label(
-                                                egui::RichText::new(&route.name)
-                                                    .font(FontId::proportional(12.5))
-                                                    .strong()
-                                                    .color(DarkTheme::TEXT_PRIMARY),
-                                            );
-                                            ui.label(
-                                                egui::RichText::new(format!("{} waypoints", route.waypoints.len()))
-                                                    .font(FontId::proportional(10.5))
-                                                    .color(DarkTheme::TEXT_MUTED),
-                                            );
-                                        });
+                                let bg = if item_resp.hovered() { pal.hover } else { pal.chrome };
+                                ui.painter().rect_filled(item_rect, CornerRadius::same(theme::RADIUS_SM), bg);
+                                ui.painter().rect_stroke(
+                                    item_rect,
+                                    CornerRadius::same(theme::RADIUS_SM),
+                                    Stroke::new(1.0_f32, pal.separator),
+                                    StrokeKind::Inside,
+                                );
 
-                                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                            if ui.small_button("✕").clicked() {
-                                                route_to_remove = Some(route.id.clone());
-                                            }
-                                            if ui
-                                                .button(
-                                                    egui::RichText::new("Play")
-                                                        .font(FontId::proportional(11.0))
-                                                        .color(DarkTheme::ACCENT_BLUE),
-                                                )
-                                                .clicked()
-                                            {
-                                                route_to_start = Some(route.id.clone());
-                                            }
-                                        });
-                                    });
-                                });
-                                ui.add_space(4.0);
+                                // Route Title
+                                ui.painter().text(
+                                    item_rect.left_center() + Vec2::new(12.0, -7.0),
+                                    Align2::LEFT_CENTER,
+                                    &route.name,
+                                    theme::semi(12.0),
+                                    pal.text,
+                                );
+
+                                // Waypoints
+                                ui.painter().text(
+                                    item_rect.left_center() + Vec2::new(12.0, 8.0),
+                                    Align2::LEFT_CENTER,
+                                    format!("{} waypoints", route.waypoints.len()),
+                                    theme::mono(10.0),
+                                    pal.text_faint,
+                                );
+
+                                let right_center = item_rect.right_center();
+                                let del_rect = Rect::from_center_size(right_center - Vec2::new(16.0, 0.0), Vec2::new(28.0, 28.0));
+                                let play_rect = Rect::from_center_size(right_center - Vec2::new(48.0, 0.0), Vec2::new(28.0, 28.0));
+
+                                let is_del_hovered = item_resp.interact_pointer_pos().map_or(false, |p| del_rect.contains(p));
+                                let is_play_hovered = item_resp.interact_pointer_pos().map_or(false, |p| play_rect.contains(p));
+
+                                // Play route button
+                                let play_bg = if is_play_hovered { pal.selection } else { Color32::TRANSPARENT };
+                                ui.painter().rect_filled(play_rect, CornerRadius::same(theme::RADIUS_SM), play_bg);
+                                if is_play_hovered {
+                                    ui.painter().rect_stroke(play_rect, CornerRadius::same(theme::RADIUS_SM), Stroke::new(1.0_f32, pal.accent), StrokeKind::Inside);
+                                }
+                                let play_icon_rect = Rect::from_center_size(play_rect.center(), Vec2::new(15.0, 15.0));
+                                icons::paint(ui.painter(), play_icon_rect, Icon::Play, pal.accent);
+
+                                // Delete route button (Generous 28x28 target)
+                                let del_bg = if is_del_hovered { pal.danger_bg } else { Color32::TRANSPARENT };
+                                ui.painter().rect_filled(del_rect, CornerRadius::same(theme::RADIUS_SM), del_bg);
+                                if is_del_hovered {
+                                    ui.painter().rect_stroke(del_rect, CornerRadius::same(theme::RADIUS_SM), Stroke::new(1.0_f32, pal.danger), StrokeKind::Inside);
+                                }
+                                let del_icon_rect = Rect::from_center_size(del_rect.center(), Vec2::new(15.0, 15.0));
+                                icons::paint(
+                                    ui.painter(),
+                                    del_icon_rect,
+                                    Icon::Trash,
+                                    if is_del_hovered { pal.danger } else { pal.text_muted },
+                                );
+
+                                if item_resp.clicked() {
+                                    if let Some(pos) = item_resp.interact_pointer_pos() {
+                                        if del_rect.contains(pos) {
+                                            route_to_remove = Some(route.id.clone());
+                                        } else if play_rect.contains(pos) {
+                                            route_to_start = Some(route.id.clone());
+                                        }
+                                    }
+                                }
+
+                                ui.add_space(3.0);
                             }
 
                             if let Some(id) = route_to_remove {
@@ -1046,83 +849,49 @@ impl eframe::App for LocationSimulatorApp {
                                 self.status_message = "Starting route simulation...".to_string();
                             }
 
-                            // Active Route Simulation Console
+                            // Route simulation active console
                             if self.route_state != "idle" {
-                                ui.add_space(8.0);
-                                let console = egui::Frame::NONE
-                                    .fill(Color32::from_rgb(20, 26, 38))
-                                    .corner_radius(CornerRadius::same(8))
-                                    .stroke(Stroke::new(1.5_f32, DarkTheme::ACCENT_BLUE))
-                                    .inner_margin(Margin::symmetric(14, 12));
+                                ui.add_space(6.0);
+                                let console_rect = ui.allocate_exact_size(egui::vec2(ui.available_width(), 64.0), egui::Sense::hover()).0;
+                                ui.painter().rect_filled(console_rect, CornerRadius::same(theme::RADIUS_SM), pal.elevated);
+                                ui.painter().rect_stroke(console_rect, CornerRadius::same(theme::RADIUS_SM), Stroke::new(1.0_f32, pal.accent), StrokeKind::Inside);
 
-                                console.show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            egui::RichText::new("ROUTE SIMULATION")
-                                                .font(FontId::proportional(10.0))
-                                                .strong()
-                                                .color(DarkTheme::TEXT_MUTED),
-                                        );
-                                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                            let (badge_text, badge_color) = if self.route_state == "running" {
-                                                ("● RUNNING", DarkTheme::ACCENT_GREEN)
-                                            } else {
-                                                ("❚❚ PAUSED", DarkTheme::ACCENT_AMBER)
-                                            };
-                                            ui.label(
-                                                egui::RichText::new(badge_text)
-                                                    .font(FontId::proportional(10.0))
-                                                    .strong()
-                                                    .color(badge_color),
-                                            );
-                                        });
-                                    });
+                                ui.painter().text(
+                                    console_rect.left_top() + Vec2::new(8.0, 10.0),
+                                    Align2::LEFT_TOP,
+                                    format!("SIMULATION · {}", self.route_state.to_uppercase()),
+                                    theme::semi(10.0),
+                                    pal.accent,
+                                );
 
-                                    ui.add_space(4.0);
+                                let progress = if self.route_progress_total > 0 {
+                                    self.route_progress_current as f32 / self.route_progress_total as f32
+                                } else {
+                                    0.0
+                                };
 
-                                    let progress = if self.route_progress_total > 0 {
-                                        self.route_progress_current as f32 / self.route_progress_total as f32
-                                    } else {
-                                        0.0
-                                    };
-                                    ui.add(egui::ProgressBar::new(progress).show_percentage());
+                                let bar_rect = Rect::from_min_size(console_rect.left_top() + Vec2::new(8.0, 26.0), Vec2::new(console_rect.width() - 16.0, 6.0));
+                                ui.painter().rect_filled(bar_rect, CornerRadius::ZERO, pal.input);
+                                let fill_bar = Rect::from_min_size(bar_rect.min, Vec2::new(bar_rect.width() * progress, bar_rect.height()));
+                                ui.painter().rect_filled(fill_bar, CornerRadius::ZERO, pal.accent);
 
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "Waypoint {} / {}",
-                                            self.route_progress_current, self.route_progress_total
-                                        ))
-                                        .font(FontId::proportional(10.5))
-                                        .color(DarkTheme::TEXT_SECONDARY),
-                                    );
-
-                                    ui.add_space(6.0);
-
-                                    ui.horizontal(|ui| {
-                                        if self.route_state == "running" {
-                                            if ui.button("Pause").clicked() {
-                                                self.daemon.pause_route();
-                                            }
-                                        } else if self.route_state == "paused" {
-                                            if ui.button("Resume").clicked() {
-                                                self.daemon.resume_route();
-                                            }
-                                        }
-                                        if ui.button("Stop").clicked() {
-                                            self.daemon.stop_route();
-                                        }
-                                    });
-                                });
+                                ui.painter().text(
+                                    console_rect.left_bottom() + Vec2::new(8.0, -10.0),
+                                    Align2::LEFT_BOTTOM,
+                                    format!("{}/{} waypoints", self.route_progress_current, self.route_progress_total),
+                                    theme::mono(10.0),
+                                    pal.text_muted,
+                                );
                             }
                         });
                 }
             });
 
         // =========================================================================
-        // 4. MAIN MAP CANVAS (CartoDB Dark Matter + Precision Cyan Reticle)
+        // 3. MAIN MAP CANVAS (Reaches Window Top, With Google Maps Floating Search)
         // =========================================================================
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(DarkTheme::WINDOW_BG))
+            .frame(egui::Frame::NONE.fill(pal.canvas))
             .show(ctx, |ui| {
                 let map = Map::new(Some(&mut self.tiles), &mut self.map_memory, self.pos);
                 let response = ui.add(map);
@@ -1130,80 +899,32 @@ impl eframe::App for LocationSimulatorApp {
                 let painter = ui.painter_at(response.rect);
                 let center = response.rect.center();
 
-                // Avionics Precision Reticle (Electric Cyan #38BDF8)
-                let reticle_color = Color32::from_rgba_unmultiplied(56, 189, 248, 240);
+                // TableX Precision Reticle (Accent Blue #4C8DFF)
+                let reticle_color = pal.accent;
                 let reticle_stroke = Stroke::new(1.5_f32, reticle_color);
 
-                // 4-Quadrant Crosshair Ticks
-                painter.line_segment(
-                    [
-                        Pos2::new(center.x - 16.0, center.y),
-                        Pos2::new(center.x - 5.0, center.y),
-                    ],
-                    reticle_stroke,
-                );
-                painter.line_segment(
-                    [
-                        Pos2::new(center.x + 5.0, center.y),
-                        Pos2::new(center.x + 16.0, center.y),
-                    ],
-                    reticle_stroke,
-                );
-                painter.line_segment(
-                    [
-                        Pos2::new(center.x, center.y - 16.0),
-                        Pos2::new(center.x, center.y - 5.0),
-                    ],
-                    reticle_stroke,
-                );
-                painter.line_segment(
-                    [
-                        Pos2::new(center.x, center.y + 5.0),
-                        Pos2::new(center.x, center.y + 16.0),
-                    ],
-                    reticle_stroke,
-                );
+                // Crosshair sight ticks
+                painter.line_segment([Pos2::new(center.x - 14.0, center.y), Pos2::new(center.x - 4.0, center.y)], reticle_stroke);
+                painter.line_segment([Pos2::new(center.x + 4.0, center.y), Pos2::new(center.x + 14.0, center.y)], reticle_stroke);
+                painter.line_segment([Pos2::new(center.x, center.y - 14.0), Pos2::new(center.x, center.y - 4.0)], reticle_stroke);
+                painter.line_segment([Pos2::new(center.x, center.y + 4.0), Pos2::new(center.x, center.y + 14.0)], reticle_stroke);
 
                 // Center Reticle Ring & Dot
-                painter.circle_stroke(center, 4.5_f32, reticle_stroke);
+                painter.circle_stroke(center, 4.0_f32, reticle_stroke);
                 painter.circle_filled(center, 1.5_f32, reticle_color);
 
-                // Floating Glassmorphic Coordinates Pill (Dark Frosted Glass)
-                let (lat, lon) = self.current_center_coordinates();
-                let hud_pos = Pos2::new(response.rect.left() + 20.0, response.rect.bottom() - 44.0);
-                let hud_rect = Rect::from_min_size(hud_pos, Vec2::new(230.0, 30.0));
+                // Floating Zoom Controls (+ / −) on right
+                let zoom_top_pos = Pos2::new(response.rect.right() - 44.0, response.rect.top() + 20.0);
+                let zoom_in_rect = Rect::from_min_size(zoom_top_pos, Vec2::new(28.0, 28.0));
+                let zoom_out_rect = Rect::from_min_size(zoom_top_pos + Vec2::new(0.0, 32.0), Vec2::new(28.0, 28.0));
 
-                painter.rect_filled(
-                    hud_rect,
-                    CornerRadius::same(7),
-                    Color32::from_rgba_unmultiplied(17, 20, 27, 235),
-                );
-                painter.rect_stroke(
-                    hud_rect,
-                    CornerRadius::same(7),
-                    Stroke::new(1.0_f32, DarkTheme::BORDER_LIGHT),
-                    StrokeKind::Outside,
-                );
-                painter.text(
-                    hud_rect.center(),
-                    Align2::CENTER_CENTER,
-                    format!("{lat:.6}°, {lon:.6}°"),
-                    FontId::monospace(12.0),
-                    DarkTheme::TEXT_CYAN,
-                );
+                painter.rect_filled(zoom_in_rect, CornerRadius::same(theme::RADIUS_SM), pal.elevated);
+                painter.rect_stroke(zoom_in_rect, CornerRadius::same(theme::RADIUS_SM), Stroke::new(1.0_f32, pal.separator), StrokeKind::Inside);
+                painter.text(zoom_in_rect.center(), Align2::CENTER_CENTER, "+", theme::semi(15.0), pal.text);
 
-                // Floating Zoom Controls (+ / −)
-                let zoom_top_pos = Pos2::new(response.rect.right() - 46.0, response.rect.top() + 18.0);
-                let zoom_in_rect = Rect::from_min_size(zoom_top_pos, Vec2::new(30.0, 30.0));
-                let zoom_out_rect = Rect::from_min_size(zoom_top_pos + Vec2::new(0.0, 34.0), Vec2::new(30.0, 30.0));
-
-                painter.rect_filled(zoom_in_rect, CornerRadius::same(5), DarkTheme::CARD_BG);
-                painter.rect_stroke(zoom_in_rect, CornerRadius::same(5), Stroke::new(1.0_f32, DarkTheme::BORDER), StrokeKind::Outside);
-                painter.text(zoom_in_rect.center(), Align2::CENTER_CENTER, "+", FontId::proportional(17.0), DarkTheme::TEXT_PRIMARY);
-
-                painter.rect_filled(zoom_out_rect, CornerRadius::same(5), DarkTheme::CARD_BG);
-                painter.rect_stroke(zoom_out_rect, CornerRadius::same(5), Stroke::new(1.0_f32, DarkTheme::BORDER), StrokeKind::Outside);
-                painter.text(zoom_out_rect.center(), Align2::CENTER_CENTER, "−", FontId::proportional(17.0), DarkTheme::TEXT_PRIMARY);
+                painter.rect_filled(zoom_out_rect, CornerRadius::same(theme::RADIUS_SM), pal.elevated);
+                painter.rect_stroke(zoom_out_rect, CornerRadius::same(theme::RADIUS_SM), Stroke::new(1.0_f32, pal.separator), StrokeKind::Inside);
+                painter.text(zoom_out_rect.center(), Align2::CENTER_CENTER, "−", theme::semi(15.0), pal.text);
 
                 if response.clicked() {
                     if let Some(pos) = response.interact_pointer_pos() {
@@ -1214,10 +935,190 @@ impl eframe::App for LocationSimulatorApp {
                         }
                     }
                 }
+
+                // =========================================================================
+                // FLOATING MAP STYLE SWITCHER (Dark / OSM / Sat) Top-Right of Map
+                // =========================================================================
+                let style_pos = Pos2::new(response.rect.right() - 210.0, response.rect.top() + 20.0);
+                let style_rect = Rect::from_min_size(style_pos, Vec2::new(154.0, 30.0));
+
+                painter.rect_filled(style_rect, CornerRadius::same(theme::RADIUS_SM), pal.elevated);
+                painter.rect_stroke(style_rect, CornerRadius::same(theme::RADIUS_SM), Stroke::new(1.0_f32, pal.separator), StrokeKind::Inside);
+
+                let mut style_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(style_rect.shrink(2.0))
+                        .layout(Layout::left_to_right(Align::Center)),
+                );
+                style_ui.spacing_mut().item_spacing.x = 2.0;
+
+                let styles = [
+                    (MapStyle::Dark, "Dark"),
+                    (MapStyle::Osm, "OSM"),
+                    (MapStyle::Satellite, "Sat"),
+                ];
+                for (style, label) in styles {
+                    let is_active = self.map_style == style;
+                    let btn = egui::Button::new(
+                        egui::RichText::new(label)
+                            .font(theme::semi(11.0))
+                            .color(if is_active { pal.accent } else { pal.text_muted }),
+                    )
+                    .fill(if is_active { pal.selection } else { Color32::TRANSPARENT })
+                    .corner_radius(CornerRadius::same(theme::RADIUS_SM));
+
+                    if style_ui.add_sized([48.0, 26.0], btn).clicked() {
+                        self.set_map_style(style);
+                    }
+                }
+
+                // =========================================================================
+                // GOOGLE MAPS STYLE FLOATING SEARCH BAR (Top-Left of Map Canvas)
+                // =========================================================================
+                let search_w = 400.0_f32;
+                let search_h = 44.0_f32;
+                let search_pos = Pos2::new(response.rect.left() + 20.0, response.rect.top() + 20.0);
+                let search_rect = Rect::from_min_size(search_pos, Vec2::new(search_w, search_h));
+
+                // Floating Card Shadow & Elevated Dark Fill
+                painter.rect_filled(
+                    search_rect,
+                    CornerRadius::same(theme::RADIUS_MD),
+                    pal.elevated,
+                );
+                painter.rect_stroke(
+                    search_rect,
+                    CornerRadius::same(theme::RADIUS_MD),
+                    Stroke::new(1.0_f32, if self.search_query.is_empty() { pal.separator } else { pal.accent }),
+                    StrokeKind::Inside,
+                );
+
+                // Search Icon on Left
+                let search_icon_rect = Rect::from_center_size(search_rect.left_center() + Vec2::new(20.0, 0.0), Vec2::new(16.0, 16.0));
+                icons::paint(
+                    &painter,
+                    search_icon_rect,
+                    Icon::Search,
+                    if self.search_query.is_empty() { pal.text_muted } else { pal.accent },
+                );
+
+                // Text input placed inside the floating search bar
+                let text_input_rect = Rect::from_min_max(
+                    search_rect.left_top() + Vec2::new(40.0, 6.0),
+                    search_rect.right_bottom() - Vec2::new(if self.search_query.is_empty() { 12.0 } else { 40.0 }, 6.0),
+                );
+
+                let mut text_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(text_input_rect)
+                        .layout(Layout::left_to_right(Align::Center)),
+                );
+
+                let edit_resp = text_ui.add(
+                    egui::TextEdit::singleline(&mut self.search_query)
+                        .hint_text("Search city, address, or coordinates...")
+                        .font(theme::ui(13.0))
+                        .text_color(pal.text)
+                        .frame(false)
+                        .desired_width(text_input_rect.width()),
+                );
+
+                // Trigger geocoding on typing
+                if edit_resp.changed() {
+                    let query = self.search_query.trim().to_string();
+                    if query.len() >= 2 && query != self.last_searched_query {
+                        self.last_searched_query = query.clone();
+                        self.geocoding.search(query);
+                    } else if query.is_empty() {
+                        self.suggestions.clear();
+                        self.show_suggestions = false;
+                    }
+                }
+
+                // Press Enter to jump
+                if edit_resp.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if let Some((lat, lon)) = parse_coordinates(&self.search_query) {
+                        self.jump_to(lat, lon);
+                        self.show_suggestions = false;
+                    } else if let Some(first) = self.suggestions.first() {
+                        self.jump_to(first.lat, first.lon);
+                        self.show_suggestions = false;
+                    }
+                }
+
+                // Clear button ('X') when query is not empty
+                if !self.search_query.is_empty() {
+                    let clear_rect = Rect::from_center_size(search_rect.right_center() - Vec2::new(20.0, 0.0), Vec2::new(24.0, 24.0));
+                    let clear_icon_rect = Rect::from_center_size(clear_rect.center(), Vec2::new(14.0, 14.0));
+                    icons::paint(&painter, clear_icon_rect, Icon::Close, pal.text_muted);
+
+                    if ui.input(|i| i.pointer.primary_clicked()) {
+                        if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+                            if clear_rect.contains(pos) {
+                                self.search_query.clear();
+                                self.last_searched_query.clear();
+                                self.suggestions.clear();
+                                self.show_suggestions = false;
+                            }
+                        }
+                    }
+                }
+
+                // Autocomplete Dropdown under Floating Search Bar
+                if self.show_suggestions && !self.suggestions.is_empty() {
+                    let dropdown_top = search_rect.bottom() + 6.0;
+                    let item_h = 38.0_f32;
+                    let num_items = self.suggestions.len().min(5);
+                    let dropdown_h = num_items as f32 * item_h + 8.0;
+                    let dropdown_rect = Rect::from_min_size(Pos2::new(search_rect.left(), dropdown_top), Vec2::new(search_w, dropdown_h));
+
+                    painter.rect_filled(dropdown_rect, CornerRadius::same(theme::RADIUS_MD), pal.elevated);
+                    painter.rect_stroke(dropdown_rect, CornerRadius::same(theme::RADIUS_MD), Stroke::new(1.0_f32, pal.separator), StrokeKind::Inside);
+
+                    let mut dropdown_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(dropdown_rect.shrink(4.0))
+                            .layout(Layout::top_down(Align::Min)),
+                    );
+
+                    let mut chosen = None;
+                    for item in self.suggestions.iter().take(5) {
+                        let (row_rect, row_resp) = dropdown_ui.allocate_exact_size(Vec2::new(dropdown_rect.width() - 8.0, item_h), egui::Sense::click());
+                        if row_resp.hovered() {
+                            dropdown_ui.painter().rect_filled(row_rect, CornerRadius::same(theme::RADIUS_SM), pal.hover);
+                        }
+
+                        let item_icon_rect = Rect::from_center_size(row_rect.left_center() + Vec2::new(16.0, 0.0), Vec2::new(14.0, 14.0));
+                        icons::paint(dropdown_ui.painter(), item_icon_rect, Icon::Search, pal.accent);
+
+                        let text = if item.display_name.len() > 55 {
+                            format!("{}...", &item.display_name[..55])
+                        } else {
+                            item.display_name.clone()
+                        };
+                        dropdown_ui.painter().text(
+                            row_rect.left_center() + Vec2::new(34.0, 0.0),
+                            Align2::LEFT_CENTER,
+                            &text,
+                            theme::ui(12.0),
+                            pal.text,
+                        );
+
+                        if row_resp.clicked() {
+                            chosen = Some((item.lat, item.lon, item.display_name.clone()));
+                        }
+                    }
+
+                    if let Some((lat, lon, name)) = chosen {
+                        self.jump_to(lat, lon);
+                        self.search_query = name;
+                        self.show_suggestions = false;
+                    }
+                }
             });
 
         // =========================================================================
-        // 5. DARK MODAL WINDOWS
+        // 4. TABLEX MODAL DIALOGS
         // =========================================================================
 
         if self.show_password_modal {
@@ -1228,23 +1129,16 @@ impl eframe::App for LocationSimulatorApp {
                 .show(ctx, |ui| {
                     ui.label(
                         egui::RichText::new("iOS 17+ devices require root permissions to initialize the RemoteXPC tunnel daemon.")
-                            .color(DarkTheme::TEXT_SECONDARY),
+                            .font(theme::ui(12.0))
+                            .color(pal.text_muted),
                     );
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Password:").color(DarkTheme::TEXT_PRIMARY));
+                    ui.add_space(6.0);
+                    ui.label(egui::RichText::new("Password:").font(theme::semi(12.0)).color(pal.text));
                     ui.add(egui::TextEdit::singleline(&mut self.password_input).password(true));
 
-                    ui.add_space(14.0);
+                    ui.add_space(10.0);
                     ui.horizontal(|ui| {
-                        let auth_btn = egui::Button::new(
-                            egui::RichText::new("Authenticate")
-                                .strong()
-                                .color(Color32::WHITE),
-                        )
-                        .fill(DarkTheme::ACCENT_BLUE)
-                        .corner_radius(CornerRadius::same(6));
-
-                        if ui.add(auth_btn).clicked() {
+                        if ui.add(egui::Button::new("Authenticate").fill(pal.accent)).clicked() {
                             self.daemon.submit_tunnel_password(&self.password_input);
                             self.password_input.clear();
                             self.show_password_modal = false;
@@ -1264,28 +1158,20 @@ impl eframe::App for LocationSimulatorApp {
                 .resizable(false)
                 .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
-                    ui.label(egui::RichText::new("Bookmark Name:").color(DarkTheme::TEXT_PRIMARY));
+                    ui.label(egui::RichText::new("Bookmark Name:").font(theme::semi(12.0)).color(pal.text));
                     ui.text_edit_singleline(&mut self.save_name_input);
 
                     ui.add_space(6.0);
                     let (lat, lon) = self.current_center_coordinates();
                     ui.label(
                         egui::RichText::new(format!("Target: {lat:.6}°, {lon:.6}°"))
-                            .font(FontId::monospace(11.0))
-                            .color(DarkTheme::TEXT_CYAN),
+                            .font(theme::mono(11.0))
+                            .color(pal.accent),
                     );
 
-                    ui.add_space(14.0);
+                    ui.add_space(10.0);
                     ui.horizontal(|ui| {
-                        let save_btn = egui::Button::new(
-                            egui::RichText::new("Save")
-                                .strong()
-                                .color(Color32::WHITE),
-                        )
-                        .fill(DarkTheme::ACCENT_BLUE)
-                        .corner_radius(CornerRadius::same(6));
-
-                        if ui.add(save_btn).clicked() {
+                        if ui.add(egui::Button::new("Save").fill(pal.accent)).clicked() {
                             if !self.save_name_input.trim().is_empty() {
                                 self.daemon.add_saved_location(
                                     &self.save_name_input,
@@ -1312,22 +1198,21 @@ impl eframe::App for LocationSimulatorApp {
                 .show(ctx, |ui| {
                     ui.label(
                         egui::RichText::new("Location Simulator")
-                            .font(FontId::proportional(16.0))
-                            .strong()
-                            .color(DarkTheme::TEXT_TITLE),
+                            .font(theme::semi(15.0))
+                            .color(pal.text),
                     );
                     ui.label(
-                        egui::RichText::new("Native Rust Edition · Dark Mode")
-                            .font(FontId::proportional(12.0))
-                            .color(DarkTheme::TEXT_CYAN),
+                        egui::RichText::new("TableX Design System · Native Rust")
+                            .font(theme::ui(11.5))
+                            .color(pal.accent),
                     );
-                    ui.add_space(10.0);
-                    ui.label("High-performance iOS Location Simulation tool.");
-                    ui.label("• Rendering: Pure Rust GPU (Metal/OpenGL)");
-                    ui.label("• Map Tiles: CartoDB Dark Matter");
-                    ui.label("• Device Protocol: pymobiledevice3 async daemon");
-                    ui.label("• iOS Support: iOS 12.0 – iOS 18+ (RemoteXPC Tunnel)");
-                    ui.add_space(14.0);
+                    ui.add_space(8.0);
+                    ui.label(
+                        egui::RichText::new("High-performance iOS Location Simulation tool.\n• UI: Pure Rust Native GPU (TableX Dark Theme, Lucide Icons)\n• Basemaps: ArcGIS Dark Gray, OpenStreetMap, Esri Satellite (100% Free, NO API Key Required)\n• Backend: pymobiledevice3 daemon (iOS 12 – iOS 18+)")
+                            .font(theme::ui(12.0))
+                            .color(pal.text_muted)
+                    );
+                    ui.add_space(12.0);
                     if ui.button("Close").clicked() {
                         self.show_about_modal = false;
                     }

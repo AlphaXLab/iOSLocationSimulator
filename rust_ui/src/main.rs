@@ -1,16 +1,30 @@
 mod app;
 mod daemon;
 mod geocoding;
+pub mod icons;
 mod models;
+pub mod theme;
+pub mod widgets;
 
 use app::LocationSimulatorApp;
 
 fn main() -> eframe::Result<()> {
+    let mut viewport = eframe::egui::ViewportBuilder::default()
+        .with_title("Location Simulator")
+        .with_inner_size([1180.0, 780.0])
+        .with_min_inner_size([960.0, 620.0]);
+
+    #[cfg(target_os = "macos")]
+    {
+        viewport = viewport
+            .with_fullsize_content_view(true)
+            .with_titlebar_shown(false)
+            .with_title_shown(false)
+            .with_titlebar_buttons_shown(true);
+    }
+
     let native_options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("Location Simulator")
-            .with_inner_size([1180.0, 780.0])
-            .with_min_inner_size([900.0, 600.0]),
+        viewport,
         ..Default::default()
     };
 
