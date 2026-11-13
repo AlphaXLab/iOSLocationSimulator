@@ -63,26 +63,22 @@ impl walkers::sources::TileSource for GoogleMapsSource {
     }
 }
 
-const CARTO_API_KEY: &str = "cb1_5809_1_802d6217ff1f677f9514472e";
-
-/// CartoDB Dark Matter with authenticated API key (ultra-dark night theme)
+/// ArcGIS Dark Gray Canvas (100% free, NO watermark, NO API key required)
 #[derive(Clone, Copy, Default)]
-pub struct CartoDark;
+pub struct ArcGisDark;
 
-impl walkers::sources::TileSource for CartoDark {
+impl walkers::sources::TileSource for ArcGisDark {
     fn tile_url(&self, tile_id: TileId) -> String {
-        let servers = ['a', 'b', 'c', 'd'];
-        let s = servers[(tile_id.x + tile_id.y) as usize % servers.len()];
         format!(
-            "https://{}.basemaps.cartocdn.com/dark_all/{}/{}/{}.png?key={}",
-            s, tile_id.zoom, tile_id.x, tile_id.y, CARTO_API_KEY
+            "https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{}/{}/{}",
+            tile_id.zoom, tile_id.y, tile_id.x
         )
     }
 
     fn attribution(&self) -> walkers::sources::Attribution {
         walkers::sources::Attribution {
-            text: "© OpenStreetMap contributors © CARTO",
-            url: "https://carto.com/attributions",
+            text: "© Esri, HERE, Garmin, © OpenStreetMap contributors",
+            url: "https://www.arcgis.com",
             logo_light: None,
             logo_dark: None,
         }
@@ -265,7 +261,7 @@ impl LocationSimulatorApp {
                 HttpTiles::with_options(OpenStreetMapSource, http_options, self.egui_ctx.clone())
             }
             MapStyle::Dark => {
-                HttpTiles::with_options(CartoDark, http_options, self.egui_ctx.clone())
+                HttpTiles::with_options(ArcGisDark, http_options, self.egui_ctx.clone())
             }
         };
     }
@@ -368,14 +364,14 @@ impl eframe::App for LocationSimulatorApp {
         let pal = theme::palette(true);
 
         // =========================================================================
-        // 1. SPACIOUS TABLEX STATUS FOOTER BAR (Height 48pt - Not Tight!)
+        // 1. SPACIOUS TABLEX STATUS FOOTER BAR (Generous 56pt height - comfortable & open)
         // =========================================================================
         egui::TopBottomPanel::bottom("tablex_footer")
-            .exact_height(48.0)
+            .exact_height(56.0)
             .frame(
                 egui::Frame::NONE
                     .fill(pal.chrome)
-                    .inner_margin(Margin::symmetric(18, 8))
+                    .inner_margin(Margin::symmetric(20, 10))
                     .stroke(Stroke::new(1.0_f32, pal.separator)),
             )
             .show(ctx, |ui| {
@@ -389,33 +385,33 @@ impl eframe::App for LocationSimulatorApp {
                         pal.ok
                     };
 
-                    let dot_center = ui.cursor().min + Vec2::new(6.0, 16.0);
-                    ui.painter().circle_filled(dot_center, 4.0_f32, dot_color);
-                    ui.add_space(18.0);
+                    let dot_center = ui.cursor().min + Vec2::new(6.0, 18.0);
+                    ui.painter().circle_filled(dot_center, 4.5_f32, dot_color);
+                    ui.add_space(20.0);
 
                     // Status Message + Realtime Map Coordinates
                     let (cur_lat, cur_lon) = self.current_center_coordinates();
                     ui.label(
                         egui::RichText::new(&self.status_message)
-                            .font(theme::ui(12.5))
+                            .font(theme::ui(13.0))
                             .color(if self.status_is_error { pal.danger } else { pal.text }),
                     );
 
-                    ui.add_space(8.0);
+                    ui.add_space(10.0);
                     ui.label(
                         egui::RichText::new(format!("({cur_lat:.6}°, {cur_lon:.6}°)",))
-                            .font(theme::mono(11.0))
+                            .font(theme::mono(11.5))
                             .color(pal.text_faint),
                     );
 
-                    // Right Side Action Buttons: Generous, comfortable 34pt height buttons
+                    // Right Side Action Buttons: Generous, comfortable 36pt height buttons with breathing room
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let has_device = self.selected_udid.is_some() || !self.devices.is_empty();
 
                         // Primary Action: "Simulate Location" (TableX Accent Blue #4C8DFF)
                         let set_btn = egui::Button::new(
                             egui::RichText::new("Simulate Location")
-                                .font(theme::semi(12.5))
+                                .font(theme::semi(13.0))
                                 .color(Color32::WHITE),
                         )
                         .fill(if has_device {
@@ -427,7 +423,7 @@ impl eframe::App for LocationSimulatorApp {
                         .corner_radius(CornerRadius::same(theme::RADIUS_SM));
 
                         if ui
-                            .add_sized([135.0, 32.0], set_btn)
+                            .add_sized([150.0, 36.0], set_btn)
                             .on_hover_text("Send simulated GPS coordinates to selected iOS device")
                             .clicked()
                         {
@@ -436,10 +432,12 @@ impl eframe::App for LocationSimulatorApp {
                             self.status_is_error = false;
                         }
 
+                        ui.add_space(10.0);
+
                         // Clear Location (TableX Danger Pill)
                         let clear_btn = egui::Button::new(
                             egui::RichText::new("Clear Location")
-                                .font(theme::ui(12.0))
+                                .font(theme::ui(12.5))
                                 .color(pal.danger),
                         )
                         .fill(pal.danger_bg)
@@ -447,7 +445,7 @@ impl eframe::App for LocationSimulatorApp {
                         .corner_radius(CornerRadius::same(theme::RADIUS_SM));
 
                         if ui
-                            .add_sized([105.0, 32.0], clear_btn)
+                            .add_sized([120.0, 36.0], clear_btn)
                             .on_hover_text("Stop location simulation on iOS device and restore real GPS")
                             .clicked()
                         {
@@ -456,17 +454,19 @@ impl eframe::App for LocationSimulatorApp {
                             self.status_is_error = false;
                         }
 
+                        ui.add_space(10.0);
+
                         // Save Bookmark button
                         let save_btn = egui::Button::new(
                             egui::RichText::new("Save Bookmark")
-                                .font(theme::ui(12.0))
+                                .font(theme::ui(12.5))
                                 .color(pal.text),
                         )
                         .fill(pal.elevated)
                         .stroke(Stroke::new(1.0_f32, pal.separator))
                         .corner_radius(CornerRadius::same(theme::RADIUS_SM));
 
-                        if ui.add_sized([115.0, 32.0], save_btn).clicked() {
+                        if ui.add_sized([125.0, 36.0], save_btn).clicked() {
                             let (lat, lon) = self.current_center_coordinates();
                             self.save_name_input = format!("Location {:.4}, {:.4}", lat, lon);
                             self.show_save_modal = true;
@@ -1046,26 +1046,32 @@ impl eframe::App for LocationSimulatorApp {
                 // =========================================================================
                 // GOOGLE MAPS STYLE FLOATING SEARCH BAR (Top-Left of Map Canvas)
                 // =========================================================================
-                let search_w = 400.0_f32;
-                let search_h = 44.0_f32;
+                let search_w = 420.0_f32;
+                let search_h = 48.0_f32;
                 let search_pos = Pos2::new(response.rect.left() + 20.0, response.rect.top() + 20.0);
                 let search_rect = Rect::from_min_size(search_pos, Vec2::new(search_w, search_h));
 
-                // Floating Card Shadow & Elevated Dark Fill
+                // Floating Google Maps Style Pill: Soft Elevation Drop Shadow
+                painter.rect_filled(
+                    search_rect.translate(Vec2::new(0.0, 3.0)),
+                    CornerRadius::same(24),
+                    Color32::from_black_alpha(65),
+                );
+                // Pill Body
                 painter.rect_filled(
                     search_rect,
-                    CornerRadius::same(theme::RADIUS_MD),
+                    CornerRadius::same(24),
                     pal.elevated,
                 );
                 painter.rect_stroke(
                     search_rect,
-                    CornerRadius::same(theme::RADIUS_MD),
+                    CornerRadius::same(24),
                     Stroke::new(1.0_f32, if self.search_query.is_empty() { pal.separator } else { pal.accent }),
                     StrokeKind::Inside,
                 );
 
-                // Search Icon on Left
-                let search_icon_rect = Rect::from_center_size(search_rect.left_center() + Vec2::new(20.0, 0.0), Vec2::new(16.0, 16.0));
+                // Search Icon on Left (vertically and horizontally centered in pill's left curve)
+                let search_icon_rect = Rect::from_center_size(search_rect.left_center() + Vec2::new(24.0, 0.0), Vec2::new(18.0, 18.0));
                 icons::paint(
                     &painter,
                     search_icon_rect,
@@ -1073,10 +1079,10 @@ impl eframe::App for LocationSimulatorApp {
                     if self.search_query.is_empty() { pal.text_muted } else { pal.accent },
                 );
 
-                // Text input placed inside the floating search bar
+                // Text input placed inside the floating search bar (generous height & padding)
                 let text_input_rect = Rect::from_min_max(
-                    search_rect.left_top() + Vec2::new(40.0, 6.0),
-                    search_rect.right_bottom() - Vec2::new(if self.search_query.is_empty() { 12.0 } else { 40.0 }, 6.0),
+                    search_rect.left_top() + Vec2::new(46.0, 4.0),
+                    search_rect.right_bottom() - Vec2::new(if self.search_query.is_empty() { 20.0 } else { 46.0 }, 4.0),
                 );
 
                 let mut text_ui = ui.new_child(
@@ -1087,9 +1093,10 @@ impl eframe::App for LocationSimulatorApp {
 
                 let edit_resp = text_ui.add(
                     egui::TextEdit::singleline(&mut self.search_query)
-                        .hint_text("Search city, address, or coordinates...")
-                        .font(theme::ui(13.0))
+                        .hint_text("Search Google Maps or coordinates...")
+                        .font(theme::ui(13.5))
                         .text_color(pal.text)
+                        .margin(Margin::symmetric(4, 8))
                         .frame(false)
                         .desired_width(text_input_rect.width()),
                 );
@@ -1119,7 +1126,7 @@ impl eframe::App for LocationSimulatorApp {
 
                 // Clear button ('X') when query is not empty
                 if !self.search_query.is_empty() {
-                    let clear_rect = Rect::from_center_size(search_rect.right_center() - Vec2::new(20.0, 0.0), Vec2::new(24.0, 24.0));
+                    let clear_rect = Rect::from_center_size(search_rect.right_center() - Vec2::new(24.0, 0.0), Vec2::new(26.0, 26.0));
                     let clear_icon_rect = Rect::from_center_size(clear_rect.center(), Vec2::new(14.0, 14.0));
                     icons::paint(&painter, clear_icon_rect, Icon::Close, pal.text_muted);
 
@@ -1137,12 +1144,18 @@ impl eframe::App for LocationSimulatorApp {
 
                 // Autocomplete Dropdown under Floating Search Bar
                 if self.show_suggestions && !self.suggestions.is_empty() {
-                    let dropdown_top = search_rect.bottom() + 6.0;
-                    let item_h = 38.0_f32;
+                    let dropdown_top = search_rect.bottom() + 8.0;
+                    let item_h = 40.0_f32;
                     let num_items = self.suggestions.len().min(5);
                     let dropdown_h = num_items as f32 * item_h + 8.0;
                     let dropdown_rect = Rect::from_min_size(Pos2::new(search_rect.left(), dropdown_top), Vec2::new(search_w, dropdown_h));
 
+                    // Drop shadow for dropdown
+                    painter.rect_filled(
+                        dropdown_rect.translate(Vec2::new(0.0, 4.0)),
+                        CornerRadius::same(theme::RADIUS_MD),
+                        Color32::from_black_alpha(70),
+                    );
                     painter.rect_filled(dropdown_rect, CornerRadius::same(theme::RADIUS_MD), pal.elevated);
                     painter.rect_stroke(dropdown_rect, CornerRadius::same(theme::RADIUS_MD), Stroke::new(1.0_f32, pal.separator), StrokeKind::Inside);
 
@@ -1167,7 +1180,7 @@ impl eframe::App for LocationSimulatorApp {
                             row_rect.left_center() + Vec2::new(34.0, 0.0),
                             Align2::LEFT_CENTER,
                             &text,
-                            theme::ui(12.0),
+                            theme::ui(12.5),
                             pal.text,
                         );
 
@@ -1185,32 +1198,34 @@ impl eframe::App for LocationSimulatorApp {
             });
 
         // =========================================================================
-        // 4. TABLEX MODAL DIALOGS
+        // 4. TABLEX MODAL DIALOGS (With Spacious 38pt Textboxes & Clean Actions)
         // =========================================================================
 
         if self.show_password_modal {
             egui::Window::new("Admin Privileges Required")
                 .collapsible(false)
                 .resizable(false)
+                .order(egui::Order::Foreground)
                 .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
+                    ui.set_min_width(440.0);
                     ui.label(
                         egui::RichText::new("iOS 17+ devices require root permissions to initialize the RemoteXPC tunnel daemon.")
-                            .font(theme::ui(12.0))
+                            .font(theme::ui(12.5))
                             .color(pal.text_muted),
                     );
-                    ui.add_space(6.0);
-                    ui.label(egui::RichText::new("Password:").font(theme::semi(12.0)).color(pal.text));
-                    ui.add(egui::TextEdit::singleline(&mut self.password_input).password(true));
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Password:").font(theme::semi(12.5)).color(pal.text));
+                    ui.add(widgets::password_input(&mut self.password_input).desired_width(410.0));
 
-                    ui.add_space(10.0);
+                    ui.add_space(14.0);
                     ui.horizontal(|ui| {
-                        if ui.add(egui::Button::new("Authenticate").fill(pal.accent)).clicked() {
+                        if ui.add_sized([140.0, 36.0], egui::Button::new(egui::RichText::new("Authenticate").font(theme::semi(13.0))).fill(pal.accent)).clicked() {
                             self.daemon.submit_tunnel_password(&self.password_input);
                             self.password_input.clear();
                             self.show_password_modal = false;
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.add_sized([100.0, 36.0], egui::Button::new(egui::RichText::new("Cancel").font(theme::ui(12.5)))).clicked() {
                             self.daemon.cancel_tunnel_password();
                             self.password_input.clear();
                             self.show_password_modal = false;
@@ -1223,22 +1238,24 @@ impl eframe::App for LocationSimulatorApp {
             egui::Window::new("Save Location Bookmark")
                 .collapsible(false)
                 .resizable(false)
+                .order(egui::Order::Foreground)
                 .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
-                    ui.label(egui::RichText::new("Bookmark Name:").font(theme::semi(12.0)).color(pal.text));
-                    ui.text_edit_singleline(&mut self.save_name_input);
+                    ui.set_min_width(440.0);
+                    ui.label(egui::RichText::new("Bookmark Name:").font(theme::semi(12.5)).color(pal.text));
+                    ui.add(widgets::text_input(&mut self.save_name_input, "e.g. Apple Park, Home...").desired_width(410.0));
 
-                    ui.add_space(6.0);
+                    ui.add_space(8.0);
                     let (lat, lon) = self.current_center_coordinates();
                     ui.label(
-                        egui::RichText::new(format!("Target: {lat:.6}°, {lon:.6}°"))
-                            .font(theme::mono(11.0))
+                        egui::RichText::new(format!("Coordinates: {lat:.6}°, {lon:.6}°"))
+                            .font(theme::mono(12.0))
                             .color(pal.accent),
                     );
 
-                    ui.add_space(10.0);
+                    ui.add_space(14.0);
                     ui.horizontal(|ui| {
-                        if ui.add(egui::Button::new("Save").fill(pal.accent)).clicked() {
+                        if ui.add_sized([120.0, 36.0], egui::Button::new(egui::RichText::new("Save").font(theme::semi(13.0))).fill(pal.accent)).clicked() {
                             if !self.save_name_input.trim().is_empty() {
                                 self.daemon.add_saved_location(
                                     &self.save_name_input,
@@ -1250,7 +1267,7 @@ impl eframe::App for LocationSimulatorApp {
                                 self.show_save_modal = false;
                             }
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.add_sized([100.0, 36.0], egui::Button::new(egui::RichText::new("Cancel").font(theme::ui(12.5)))).clicked() {
                             self.show_save_modal = false;
                         }
                     });
@@ -1261,8 +1278,10 @@ impl eframe::App for LocationSimulatorApp {
             egui::Window::new("About Location Simulator")
                 .collapsible(false)
                 .resizable(false)
+                .order(egui::Order::Foreground)
                 .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
+                    ui.set_min_width(440.0);
                     ui.label(
                         egui::RichText::new("Location Simulator")
                             .font(theme::semi(15.0))
@@ -1275,12 +1294,12 @@ impl eframe::App for LocationSimulatorApp {
                     );
                     ui.add_space(8.0);
                     ui.label(
-                        egui::RichText::new("High-performance iOS Location Simulation tool.\n• UI: Pure Rust Native GPU (TableX Dark Theme, Lucide Icons)\n• Basemaps: ArcGIS Dark Gray, OpenStreetMap, Esri Satellite (100% Free, NO API Key Required)\n• Backend: pymobiledevice3 daemon (iOS 12 – iOS 18+)")
+                        egui::RichText::new("High-performance iOS Location Simulation tool.\n• UI: Pure Rust Native GPU (TableX Dark Theme, Lucide Icons)\n• Basemaps: Google Maps, ArcGIS Dark Gray, OpenStreetMap\n• Backend: pymobiledevice3 daemon (iOS 12 – iOS 18+)")
                             .font(theme::ui(12.0))
                             .color(pal.text_muted)
                     );
-                    ui.add_space(12.0);
-                    if ui.button("Close").clicked() {
+                    ui.add_space(14.0);
+                    if ui.add_sized([100.0, 36.0], egui::Button::new(egui::RichText::new("Close").font(theme::ui(12.5)))).clicked() {
                         self.show_about_modal = false;
                     }
                 });
@@ -1293,36 +1312,34 @@ impl eframe::App for LocationSimulatorApp {
                 .order(egui::Order::Foreground)
                 .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
-                    ui.set_min_width(430.0);
+                    ui.set_min_width(460.0);
                     ui.label(
                         egui::RichText::new("Enter your Google Maps Platform API key to enable official Google Maps tiles and worldwide place search in all languages (including UTF-8 & Myanmar).")
                             .font(theme::ui(12.5))
                             .color(pal.text_muted),
                     );
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Google Maps API Key:").font(theme::semi(12.0)).color(pal.text));
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new("Google Maps API Key:").font(theme::semi(12.5)).color(pal.text));
                     ui.add(
-                        egui::TextEdit::singleline(&mut self.api_key_input)
-                            .hint_text("AIzaSy...")
-                            .font(theme::mono(12.0))
-                            .desired_width(410.0),
+                        widgets::mono_input(&mut self.api_key_input, "AIzaSy...")
+                            .desired_width(430.0),
                     );
-                    ui.add_space(4.0);
+                    ui.add_space(6.0);
                     ui.label(
                         egui::RichText::new("Need a key? Visit console.cloud.google.com → APIs & Services")
-                            .font(theme::ui(10.5))
+                            .font(theme::ui(11.0))
                             .color(pal.text_faint),
                     );
-                    ui.add_space(12.0);
+                    ui.add_space(14.0);
                     ui.horizontal(|ui| {
-                        if ui.add(egui::Button::new("Save & Enable Google Maps").fill(pal.accent)).clicked() {
+                        if ui.add_sized([200.0, 36.0], egui::Button::new(egui::RichText::new("Save & Enable Google Maps").font(theme::semi(13.0))).fill(pal.accent)).clicked() {
                             self.config.google_maps_api_key = self.api_key_input.trim().to_string();
                             self.config.save();
                             self.set_map_style(MapStyle::Google);
                             self.status_message = "Google Maps enabled".to_string();
                             self.show_api_key_modal = false;
                         }
-                        if ui.button("Continue Without Key").clicked() {
+                        if ui.add_sized([160.0, 36.0], egui::Button::new(egui::RichText::new("Continue Without Key").font(theme::ui(12.5)))).clicked() {
                             self.show_api_key_modal = false;
                         }
                     });

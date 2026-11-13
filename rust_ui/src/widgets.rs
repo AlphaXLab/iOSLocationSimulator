@@ -114,3 +114,30 @@ pub fn search_field(
 
     edit.union(response)
 }
+
+/// Comfortable, spacious text input with 38pt height, 10px vertical padding, and TableX dark styling
+pub fn text_input<'a>(text: &'a mut String, hint: &'a str) -> egui::TextEdit<'a> {
+    egui::TextEdit::singleline(text)
+        .hint_text(hint)
+        .font(theme::ui(13.5))
+        .margin(egui::Margin::symmetric(14, 10))
+        .min_size(egui::vec2(100.0, 38.0))
+}
+
+/// Comfortable password input with 38pt height and generous padding
+pub fn password_input<'a>(text: &'a mut String) -> egui::TextEdit<'a> {
+    egui::TextEdit::singleline(text)
+        .password(true)
+        .font(theme::ui(13.5))
+        .margin(egui::Margin::symmetric(14, 10))
+        .min_size(egui::vec2(100.0, 38.0))
+}
+
+/// Comfortable monospace text input for API keys & tokens
+pub fn mono_input<'a>(text: &'a mut String, hint: &'a str) -> egui::TextEdit<'a> {
+    egui::TextEdit::singleline(text)
+        .hint_text(hint)
+        .font(theme::mono(13.0))
+        .margin(egui::Margin::symmetric(14, 10))
+        .min_size(egui::vec2(100.0, 38.0))
+}

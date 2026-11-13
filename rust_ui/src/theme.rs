@@ -223,11 +223,11 @@ pub fn mono(size: f32) -> FontId {
 pub fn apply(ctx: &egui::Context, dark: bool) {
     ctx.set_visuals(visuals(dark));
     ctx.all_styles_mut(|style| {
-        style.spacing.item_spacing = egui::vec2(SPACE_2, SPACE_1);
-        style.spacing.button_padding = egui::vec2(10.0, 5.0);
-        style.spacing.interact_size = egui::vec2(28.0, 20.0);
-        style.spacing.menu_margin = Margin::same(6);
-        style.spacing.window_margin = Margin::same(12);
+        style.spacing.item_spacing = egui::vec2(SPACE_2, SPACE_2);
+        style.spacing.button_padding = egui::vec2(14.0, 8.0);
+        style.spacing.interact_size = egui::vec2(28.0, 36.0);
+        style.spacing.menu_margin = Margin::same(8);
+        style.spacing.window_margin = Margin::same(16);
         style.spacing.indent = 14.0;
         style.text_styles.insert(egui::TextStyle::Small, ui(11.0));
         style.text_styles.insert(egui::TextStyle::Body, ui(13.0));
