@@ -387,7 +387,7 @@ impl LocationSimulatorApp {
                         self.status_message = "RemoteXPC tunnel stopped".to_string();
                         self.status_is_error = false;
                         self.is_tunnel_starting = false;
-                    } else if status.status.as_deref() == Some("starting") {
+                    } else if status.status.as_deref() == Some("starting") || status.status.as_deref() == Some("restarting") {
                         self.status_message = "Starting RemoteXPC tunnel daemon...".to_string();
                         self.status_is_error = false;
                         self.is_tunnel_starting = true;
@@ -792,6 +792,9 @@ impl eframe::App for LocationSimulatorApp {
                         self.daemon.stop_tunnel();
                     } else if is_auth_needed {
                         self.show_password_modal = true;
+                    } else if self.devices.is_empty() {
+                        self.status_message = "Connect an iOS device to start tunnel".to_string();
+                        self.status_is_error = false;
                     } else {
                         self.is_tunnel_starting = true;
                         self.daemon.start_tunnel();

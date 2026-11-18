@@ -113,6 +113,10 @@ class TunnelManager(QObject):
         self._monitor_thread: Optional[threading.Thread] = None
         self._is_running = is_tunneld_listening()
         self._is_starting = False  # Track if we're currently trying to start
+        self._device_connected = False
+        self._should_run = False
+        self._restart_timer: Optional[threading.Timer] = None
+        self._restart_lock = threading.Lock()
 
     @property
     def is_running(self) -> bool:
@@ -120,6 +124,85 @@ class TunnelManager(QObject):
         if self._is_running and self._process is not None and self._process.poll() is None:
             return True
         return is_tunneld_listening()
+
+    def set_device_connected(self, connected: bool):
+        """Update device connection status. Stop tunnel when disconnected; start when connected."""
+        with self._restart_lock:
+            prev_connected = self._device_connected
+            self._device_connected = connected
+
+            if not connected:
+                logger.info("No iOS device connected. Stopping RemoteXPC tunnel...")
+                self._should_run = False
+                self._cancel_restart_timer()
+                if self.is_running or self._is_starting or self._process is not None:
+                    threading.Thread(target=self._stop_internal, daemon=True).start()
+            else:
+                self._should_run = True
+                if not self.is_running and not self._is_starting:
+                    logger.info("iOS device connected. Starting RemoteXPC tunnel...")
+                    threading.Thread(target=self.start_tunnel, daemon=True).start()
+
+    def _cancel_restart_timer(self):
+        """Cancel any scheduled auto-restart timer"""
+        if self._restart_timer:
+            try:
+                self._restart_timer.cancel()
+            except Exception:
+                pass
+            self._restart_timer = None
+
+    def _schedule_auto_restart(self, delay: float = 2.0):
+        """Auto restart tunnel when an issue occurs, instead of displaying error"""
+        with self._restart_lock:
+            self._cancel_restart_timer()
+            if not self._device_connected or not self._should_run:
+                self._is_starting = False
+                return
+
+            self._is_starting = True
+            self.tunnel_starting.emit()
+
+            def _do_restart():
+                with self._restart_lock:
+                    if not self._device_connected or not self._should_run:
+                        self._is_starting = False
+                        return
+                    logger.info("Executing auto-restart of RemoteXPC tunnel...")
+                    self._cleanup_process()
+                    time.sleep(1.0)
+                    self.start_tunnel()
+
+            self._restart_timer = threading.Timer(delay, _do_restart)
+            self._restart_timer.daemon = True
+            self._restart_timer.start()
+
+    def _cleanup_process(self):
+        """Terminate active tunnel process and kill any orphaned tunneld"""
+        if self._process:
+            try:
+                if self._process.poll() is None:
+                    self._process.terminate()
+                    self._process.wait(timeout=2)
+            except Exception:
+                try:
+                    self._process.kill()
+                except Exception:
+                    pass
+        self._process = None
+
+        if is_tunneld_listening():
+            saved_pwd = _get_keychain_password()
+            if saved_pwd:
+                subprocess.run(
+                    ['sudo', '-S', 'pkill', '-f', 'pymobiledevice3 remote tunneld'],
+                    input=saved_pwd + '\n',
+                    text=True,
+                    capture_output=True,
+                    timeout=4
+                )
+            else:
+                subprocess.run(['pkill', '-f', 'pymobiledevice3 remote tunneld'], capture_output=True, timeout=4)
 
     def _format_clean_error(self, stderr: str) -> str:
         """Extract a concise single-line error message from process stderr"""
@@ -142,6 +225,13 @@ class TunnelManager(QObject):
 
     def start_tunnel(self):
         """Start the RemoteXPC tunnel in background"""
+        if not self._device_connected:
+            logger.info("Cannot start tunnel: No iOS device connected")
+            self._is_starting = False
+            return
+
+        self._should_run = True
+
         if self.is_running or is_tunneld_listening():
             logger.info("Tunnel already running on localhost:49151")
             self._is_running = True
@@ -163,7 +253,6 @@ class TunnelManager(QObject):
             python_exe = _get_python_executable()
 
             # Check if we can run sudo without password (for better UX)
-            # If not, the tunnel will fail and we'll show instructions
             cmd = ['sudo', '-n', python_exe, '-m', 'pymobiledevice3', 'remote', 'tunneld']
 
             # Start the process
@@ -205,19 +294,20 @@ class TunnelManager(QObject):
                 logger.info("Found saved password in macOS Keychain, trying auto-authentication...")
                 if self._start_tunnel_with_password(saved_pwd):
                     return
-                else:
-                    logger.warning("Saved Keychain password failed, clearing from Keychain...")
-                    _clear_keychain_password()
 
-            # Process died immediately and no valid saved password - request password from GUI
+            # If passwordless sudo failed and no valid saved password - request password from GUI
             self._is_starting = False
             logger.info("Requesting password from user...")
             self.password_required.emit()
 
         except Exception as e:
-            self._is_starting = False
             logger.error(f"Failed to start tunnel: {str(e)}")
-            self.tunnel_error.emit(f"Failed to start tunnel: {str(e)}")
+            if self._device_connected and self._should_run:
+                logger.info("Tunnel startup encountered an issue. Auto-restarting...")
+                self._schedule_auto_restart(delay=2.0)
+            else:
+                self._is_starting = False
+                self.tunnel_stopped.emit()
 
     def _start_tunnel_with_password(self, password: str) -> bool:
         """Start tunnel with provided sudo password. Returns True on success, False on failure."""
@@ -261,27 +351,40 @@ class TunnelManager(QObject):
                 self._monitor_thread.start()
                 return True
             else:
-                # Process died - likely wrong password or other error
                 stderr = self._process.stderr.read() if self._process.stderr else ""
-                self._is_starting = False
-                logger.error(f"Tunnel failed to start: {stderr}")
+                logger.warning(f"Tunnel process failed with password: {stderr}")
 
                 if "address already in use" in stderr.lower() or "errno 48" in stderr.lower() or is_tunneld_listening():
                     self._is_running = True
+                    self._is_starting = False
                     logger.info("Tunnel daemon already running on port 49151")
                     self.tunnel_started.emit()
                     return True
 
                 if "Sorry, try again" in stderr or "incorrect password" in stderr.lower():
-                    self.tunnel_error.emit("Incorrect password. Please try again.")
+                    # Invalid password: user must re-enter
+                    self._is_starting = False
+                    _clear_keychain_password()
+                    self.password_required.emit()
+                    return False
+
+                # Any other issue: auto-restart instead of displaying error
+                if self._device_connected and self._should_run:
+                    logger.info("Tunnel encountered an issue with password. Auto-restarting...")
+                    self._schedule_auto_restart(delay=2.0)
+                    return False
                 else:
-                    self.tunnel_error.emit(self._format_clean_error(stderr))
-                return False
+                    self._is_starting = False
+                    self.tunnel_stopped.emit()
+                    return False
 
         except Exception as e:
-            self._is_starting = False
             logger.error(f"Failed to start tunnel with password: {str(e)}")
-            self.tunnel_error.emit(f"Failed to start tunnel: {str(e)}")
+            if self._device_connected and self._should_run:
+                self._schedule_auto_restart(delay=2.0)
+            else:
+                self._is_starting = False
+                self.tunnel_stopped.emit()
             return False
 
     def provide_password(self, password: str, remember: bool = True):
@@ -295,8 +398,10 @@ class TunnelManager(QObject):
     def cancel_password(self):
         """Called by GUI when user cancels password prompt"""
         self._is_starting = False
+        self._should_run = False
+        self._cancel_restart_timer()
         logger.info("Tunnel start cancelled by user")
-        self.tunnel_error.emit("Tunnel start cancelled")
+        self.tunnel_stopped.emit()
 
     def _monitor_tunnel(self):
         """Monitor tunnel process in background"""
@@ -309,43 +414,36 @@ class TunnelManager(QObject):
 
             logger.info("Tunnel process exited")
             self._is_running = False
-            self.tunnel_stopped.emit()
+
+            if self._device_connected and self._should_run:
+                logger.info("Tunnel exited unexpectedly while device is connected. Auto-restarting...")
+                self._schedule_auto_restart(delay=2.0)
+            else:
+                self.tunnel_stopped.emit()
 
         except Exception as e:
             logger.error(f"Error monitoring tunnel: {str(e)}")
+            if self._device_connected and self._should_run:
+                self._schedule_auto_restart(delay=2.0)
+            else:
+                self.tunnel_stopped.emit()
 
-    def stop_tunnel(self):
+    def _stop_internal(self):
+        """Internal helper to stop the tunnel process and cleanup"""
+        self._cancel_restart_timer()
+        self._cleanup_process()
+        self._is_running = False
+        self._is_starting = False
+        self.tunnel_stopped.emit()
+        logger.info("RemoteXPC tunnel stopped")
+
+    def stop_tunnel(self, manual: bool = False):
         """Stop the tunnel process"""
         try:
-            logger.info("Stopping tunnel...")
-
-            if self._process and self._process.poll() is None:
-                self._process.terminate()
-                try:
-                    self._process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    logger.warning("Tunnel didn't stop gracefully, killing...")
-                    self._process.kill()
-
-            if is_tunneld_listening():
-                saved_pwd = _get_keychain_password()
-                if saved_pwd:
-                    subprocess.run(
-                        ['sudo', '-S', 'pkill', '-f', 'pymobiledevice3 remote tunneld'],
-                        input=saved_pwd + '\n',
-                        text=True,
-                        capture_output=True,
-                        timeout=5
-                    )
-                else:
-                    subprocess.run(['pkill', '-f', 'pymobiledevice3 remote tunneld'], capture_output=True, timeout=5)
-
-            self._is_running = False
-            self._process = None
-            self.tunnel_stopped.emit()
-
-            logger.info("Tunnel stopped")
-
+            logger.info("Stopping RemoteXPC tunnel...")
+            if manual:
+                self._should_run = False
+            self._stop_internal()
         except Exception as e:
             logger.error(f"Error stopping tunnel: {str(e)}")
 

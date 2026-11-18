@@ -110,10 +110,15 @@ class CoreDaemon:
 
     def _on_devices_updated(self, devices):
         serialized = [serialize_device(d) for d in devices]
+        has_devices = len(devices) > 0
+
         emit_event("devices_updated", {
             "devices": serialized,
             "selected_udid": self.device_manager.selected_device.udid if self.device_manager.selected_device else None
         })
+
+        # Automatically stop tunnel if no device is connected; restart when connected
+        self.tunnel_manager.set_device_connected(has_devices)
 
     def _get_saved_locations(self):
         return [loc.to_dict() for loc in self.saved_locations.locations]
@@ -182,6 +187,7 @@ class CoreDaemon:
 
         elif method == "start_tunnel":
             emit_event("tunnel_status", {"status": "starting", "running": False})
+            self.tunnel_manager._should_run = True
             threading.Thread(target=self.tunnel_manager.start_tunnel, daemon=True).start()
             return {"success": True}
 
@@ -197,7 +203,7 @@ class CoreDaemon:
             return {"success": True}
 
         elif method == "stop_tunnel":
-            self.tunnel_manager.stop_tunnel()
+            self.tunnel_manager.stop_tunnel(manual=True)
             return {"success": True}
 
         elif method == "get_tunnel_status":
@@ -289,8 +295,8 @@ class CoreDaemon:
             raise ValueError(f"Unknown method: {method}")
 
     def run(self):
-        # Start device discovery
-        self.device_manager.start_auto_refresh(5000)
+        # Start device discovery (every 3 seconds)
+        self.device_manager.start_auto_refresh(3000)
 
         # Notify Rust that daemon is ready
         emit_event("ready", {
